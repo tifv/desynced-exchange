@@ -1,0 +1,12 @@
+[package]
+name = "serde-desynced"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = "=1.*"
+thiserror = "=1.*"
+flate2 = "=1.*"
+
+[dev-dependencies]
+ron = ">=0.8.*"
