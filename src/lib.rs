@@ -301,6 +301,7 @@
 
 
 mod string;
+mod value;
 mod table;
 
 mod ser;

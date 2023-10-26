@@ -1,8 +1,9 @@
 use std::marker::PhantomData;
 
 use crate::string::Str;
+pub(crate) use crate::value::Key;
 
-// https://www.lua.org/source/5.3/lstring.c.html#luaS_hash
+// https://www.lua.org/source/5.4/lstring.c.html#luaS_hash
 const fn str_table_hash_with_seed<const SEED: u32>(value: &str) -> u32 {
     let value = value.as_bytes();
     let mut i = value.len();
@@ -25,18 +26,16 @@ const fn str_table_hash_with_seed<const SEED: u32>(value: &str) -> u32 {
 
 pub(crate) const fn str_table_hash(value: &str) -> u32 {
     str_table_hash_with_seed::<0x_645D_BFCD>(value)
-}    
-
-impl Str {
-    pub(crate) fn table_hash(&self) -> u32 {
-        str_table_hash(self)
-    }    
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub(crate) enum Key {
-    Index(i32),
-    Name(Str),
+// https://www.lua.org/source/5.4/ltable.c.html#hashint
+pub(crate) const fn int_table_hash(value: i32, logsize: u16) -> u32 {
+    if logsize == 0 { return 0; }
+    if value >= 0 {
+        (value % (mask(logsize) as i32)) as u32
+    } else {
+        (value as u32) % mask(logsize)
+    }
 }
 
 pub(crate) enum Item<V> {
@@ -51,14 +50,11 @@ pub(crate) enum InsertItem<V> {
 }
 
 impl Key {
-    fn table_hash(&self) -> u32 {
-        match *self {
-            Self::Index(index) => index as u32,
-            Self::Name(ref value) => value.table_hash(),
-        }
-    }
     fn position(&self, logsize: u16) -> u32 {
-        self.table_hash() & mask(logsize)
+        match *self {
+            Self::Index(index) => int_table_hash(index, logsize),
+            Self::Name(ref value) => str_table_hash(value) & mask(logsize),
+        }
     }
 }
 
@@ -104,10 +100,10 @@ impl<V> Item<V> {
 
 impl<V> InsertItem<V> {
     fn position(&self, logsize: u16) -> u32 {
-        (match *self {
-            Self::Dead{position} => position,
-            Self::Live{ref key, ..} => key.table_hash(),
-        }) & mask(logsize)
+        match *self {
+            Self::Dead{position} => position & mask(logsize),
+            Self::Live{ref key, ..} => key.position(logsize),
+        }
     }
 }
 
@@ -144,21 +140,24 @@ unsafe fn ilog2_exact(size: usize) -> u16 {
 }
 
 #[inline]
-fn iexp2(logsize: Option<u16>) -> u32 {
+const fn iexp2(logsize: Option<u16>) -> u32 {
     let Some(logsize) = logsize else { return 0 };
-    1_u32.checked_shl(logsize.into())
-        .filter(|&x| i32::try_from(x - 1).is_ok())
-        .expect("size should be addressable by i32")
+    match 1_u32.checked_shl(logsize as u32) {
+        Some(exp) if exp - 1 <= (i32::MAX as u32) => exp,
+        _ => panic!("size should be addressable by i32"),
+    }
 }
 
 #[inline]
-fn mask(logsize: u16) -> u32 {
+const fn mask(logsize: u16) -> u32 {
     iexp2(Some(logsize)) - 1
 }
 
 pub(crate) trait TableMode {}
 pub(crate) struct SerializeMode;
 impl TableMode for SerializeMode {}
+pub(crate) struct DeserializeMode;
+impl TableMode for DeserializeMode {}
 
 pub(crate) struct Table<V, M: TableMode> {
     // invariant: items.len() is a power of two

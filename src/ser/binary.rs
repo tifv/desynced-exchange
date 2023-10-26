@@ -1,4 +1,4 @@
-use std::{collections::hash_map::{self, HashMap}, mem::MaybeUninit};
+use std::collections::hash_map::{self, HashMap};
 
 use serde::{ser, Serialize as Se, Serializer as Ser};
 
@@ -80,16 +80,16 @@ impl<'s> Ser for &'s mut Serializer {
 
     fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
         match v {
-            -0x20 ..= 0x3F => {
-                self.output.push(v as u8);
+            -0x20 ..= 0x7F => {
+                self.output.extend::<[u8;1]>((v as i8).to_le_bytes());
             },
-            0x40 ..= 0xFF => {
+            0x80 ..= 0xFF => {
                 self.output.push(0xCC);
-                self.output.push(v as u8);
+                self.output.extend::<[u8;1]>((v as u8).to_le_bytes());
             },
             0x_0100 ..= 0x_FFFF => {
                 self.output.push(0xCD);
-                self.output.extend::<[u8;2]>((v as i16).to_le_bytes());
+                self.output.extend::<[u8;2]>((v as u16).to_le_bytes());
             },
             0x_0001_0000 ..= 0x_7FFF_FFFF => {
                 self.output.push(0xCE);
@@ -97,7 +97,7 @@ impl<'s> Ser for &'s mut Serializer {
             },
             -0x7F ..= -0x21 => {
                 self.output.push(0xD0);
-                self.output.push(v as u8);
+                self.output.extend::<[u8;1]>((v as i8).to_le_bytes());
             },
             -0x_7FFF ..= -0x_0080 => {
                 self.output.push(0xD1);
@@ -205,7 +205,7 @@ impl<'s> Ser for &'s mut Serializer {
         variant: &'static str,
     ) -> Result<Self::Ok, Self::Error> {
         self.serialize_constant( variant,
-            || Error::from("unit variant is not supported"))
+            || Error::from("this unit variant is not supported"))
         // for map keys, a different choice is made
     }
 
