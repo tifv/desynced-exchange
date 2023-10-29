@@ -95,8 +95,8 @@
 //! 
 //! You may ask at this point, why not remove deleted keys at
 //! the deserializer level?
-//! Indeed, this way we would be able to completely ignore the existence
-//! of dead keys both when deserializing and serializing.
+//! Wouldn't we be able to completely ignore the existence
+//! of dead keys both when deserializing and serializing?
 //! 
 //! Alas, the latter is not true.
 //! There are cases when the game expects there to be a dead key in
@@ -104,12 +104,12 @@
 //! If you omit it, the blueprint string will not be recognized
 //! by the game.
 //! 
-//! Therefore the dead keys are necessary element of serialization.
-//! While deserialization doesn't technically need then, dead keys
+//! Therefore dead keys are a necessary element of serialization.
+//! While deserialization doesn't technically need them, dead keys
 //! are retained during it anyway to maintain logical
 //! correspondence
 //! (but mainly to serve debugging needs and
-//! blueprint → `serde::Value` → blueprint conversion).
+//! blueprint → `Value` → blueprint conversion).
 //! 
 //! ### A dead key case
 //! 
@@ -123,7 +123,7 @@
 //! * may contain numbered fields for instruction's arguments;
 //! * may contain `next` field with the index of the next instruction
 //!   (omitted when the next instruction sits literally next in the sequence);
-//! * may contain other fields such as `cmt`, `nx`, `ny`.
+//! * may contain other fields such as `txt`, `c`, `cmt`, `nx`, `ny`.
 //! 
 //! The problem is with the `next` field.
 //! It cannot be completely omitted: you must either include it
@@ -188,7 +188,6 @@
 #![warn(clippy::mut_mut)]
 #![warn(clippy::needless_for_each)]
 #![warn(clippy::needless_pass_by_value)]
-#![warn(clippy::option_if_let_else)]
 #![warn(clippy::option_option)]
 #![warn(clippy::or_fun_call)]
 #![warn(clippy::partial_pub_fields)]
@@ -292,6 +291,8 @@
 #![allow(clippy::diverging_sub_expression)]
 #![allow(clippy::needless_pass_by_value)]
 
+// also check all XXX
+
 // LINTS: production
 // #![warn(clippy::todo)]
 // #![warn(clippy::unimplemented)]
@@ -299,10 +300,32 @@
 // #![warn(clippy::exhaustive_enums)]
 // #![warn(clippy::exhaustive_structs)]
 
+// pub mod iterpower;
 
-mod string;
-mod value;
 mod table;
 
-mod ser;
-mod de;
+mod value;
+
+// mod ser;
+// mod de;
+
+mod load;
+mod dump;
+
+pub enum Exchange<P, B> {
+    Blueprint(P),
+    Behavior(B),
+}
+
+type ExchangeKind = Exchange<(), ()>;
+
+impl<P, B> From<&Exchange<P, B>> for ExchangeKind {
+    fn from(value: &Exchange<P, B>) -> Self {
+        match value {
+            Exchange::Blueprint(..) => Self::Blueprint(()),
+            Exchange::Behavior(..) => Self::Behavior(()),
+        }
+    }
+}
+
+
