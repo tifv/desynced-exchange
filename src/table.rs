@@ -26,7 +26,7 @@ impl<I, S> crate::dump::DumpKey for Key<I, S>
 where I: Borrow<i32>, S: Borrow<str>
 {
     fn dump_key<DD: crate::dump::KeyDumper>(&self, dumper: DD)
-    -> Result<DD::Ok, crate::dump::Error> {
+    -> Result<DD::Ok, DD::Error> {
         match self {
             Self::Index(index) => dumper.dump_integer(*index.borrow()),
             Self::Name(name) => dumper.dump_string(name.borrow()),

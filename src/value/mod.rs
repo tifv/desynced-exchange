@@ -23,7 +23,7 @@ pub enum Value {
 type Key = crate::table::Key<i32, Str>;
 
 impl dump::Dump for Value {
-    fn dump<DD: dump::Dumper>(&self, dumper: DD) -> Result<DD::Ok, dump::Error> {
+    fn dump<DD: dump::Dumper>(&self, dumper: DD) -> Result<DD::Ok, DD::Error> {
         match *self {
             Self::Nil => dumper.dump_nil(),
             Self::Boolean(value) =>

@@ -181,7 +181,6 @@
 #![warn(clippy::match_same_arms)]
 #![warn(clippy::match_wild_err_arm)]
 #![warn(clippy::match_wildcard_for_single_variants)]
-#![warn(clippy::mem_forget)]
 #![warn(clippy::mismatching_type_param_order)]
 #![warn(clippy::multiple_unsafe_ops_per_block)]
 #![warn(clippy::must_use_candidate)]
@@ -301,6 +300,8 @@
 // #![warn(clippy::exhaustive_structs)]
 
 // pub mod iterpower;
+
+mod ascii;
 
 mod table;
 
