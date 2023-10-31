@@ -3,6 +3,7 @@ use std::io::Read;
 use flate2::read::ZlibDecoder as UnZippingReader;
 
 use crate::{
+    Exchange,
     ascii::{self, Ascii, AsciiArray, AsciiStr},
     intlim::{Int62, Int31, decode_base62}, table::u32_to_usize,
 };
@@ -10,7 +11,6 @@ use crate::{
 use super::{
     error::Error,
     reader::{Reader, AsciiReader},
-    ExchangeKind,
 };
 
 #[cold]
@@ -18,16 +18,16 @@ fn error_eof() -> Error {
     Error::from("unexpected end of data")
 }
 
-pub(super) fn decompress(
+pub(crate) fn decompress(
     body: &str,
-) -> Result<(ExchangeKind, Vec<u8>), Error> {
+) -> Result<Exchange<Vec<u8>, Vec<u8>>, Error> {
     let mut body = AsciiReader::from_slice(<&AsciiStr>::try_from(body)?);
     let kind = match body.read_slice(3)
         .map(|s| <&AsciiStr>::from(s).into())
         .ok_or_else(error_eof)?
     {
-        "DSB" => ExchangeKind::Blueprint(()),
-        "DSC" => ExchangeKind::Behavior(()),
+        "DSB" => Exchange::Blueprint(()),
+        "DSC" => Exchange::Behavior(()),
         _ => return Err(Error::from("unrecognized blueprint header")),
     };
     let encoded_len = read_len_base31(&mut body)?;
@@ -46,7 +46,7 @@ pub(super) fn decompress(
         }
         unzipped
     };
-    Ok((kind, body))
+    Ok(kind.map_mono(|()| body))
 }
 
 fn read_len_base31(reader: &mut AsciiReader) -> Result<usize, Error> {

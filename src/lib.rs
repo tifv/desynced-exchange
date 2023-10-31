@@ -314,21 +314,67 @@ mod value;
 mod load;
 mod dump;
 
-#[derive(Debug)]
+mod test;
+
+const MAX_ASSOC_LOGLEN: u16 = 5;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Exchange<P, B> {
     Blueprint(P),
     Behavior(B),
 }
 
-type ExchangeKind = Exchange<(), ()>;
-
-impl<P, B> From<&Exchange<P, B>> for ExchangeKind {
-    fn from(value: &Exchange<P, B>) -> Self {
-        match value {
-            Exchange::Blueprint(..) => Self::Blueprint(()),
-            Exchange::Behavior(..) => Self::Behavior(()),
+impl<P, B> Exchange<P, B> {
+    pub fn as_ref(&self) -> Exchange<&P, &B> {
+        match self {
+            Self::Blueprint(value) => Exchange::Blueprint(value),
+            Self::Behavior (value) => Exchange::Behavior (value),
+        }
+    }
+    pub fn as_deref(&self) -> Exchange<&P::Target, &B::Target>
+    where P: std::ops::Deref, B: std::ops::Deref
+    {
+        match self {
+            Self::Blueprint(value) => Exchange::Blueprint(value),
+            Self::Behavior (value) => Exchange::Behavior (value),
+        }
+    }
+    pub fn map<P1, B1, PF, BF>(self, pf: PF, bf: BF) -> Exchange<P1, B1>
+    where PF: FnOnce(P) -> P1, BF: FnOnce(B) -> B1,
+    {
+        match self {
+            Self::Blueprint(value) => Exchange::Blueprint(pf(value)),
+            Self::Behavior (value) => Exchange::Behavior (bf(value)),
         }
     }
 }
 
+impl<V> Exchange<V, V> {
+    pub fn map_mono<V1, F>(self, f: F) -> Exchange<V1, V1>
+    where F: FnOnce(V) -> V1,
+    {
+        match self {
+            Self::Blueprint(value) => Exchange::Blueprint(f(value)),
+            Self::Behavior (value) => Exchange::Behavior (f(value)),
+        }
+    }
+}
+
+impl<P, B> Exchange<Option<P>, Option<B>> {
+    pub fn transpose(self) -> Option<Exchange<P, B>> {
+        Some(match self {
+            Self::Blueprint(value) => Exchange::Blueprint(value?),
+            Self::Behavior (value) => Exchange::Behavior (value?),
+        })
+    }
+}
+
+impl<P, B, E> Exchange<Result<P, E>, Result<B, E>> {
+    pub fn transpose(self) -> Result<Exchange<P, B>, E> {
+        Ok(match self {
+            Self::Blueprint(value) => Exchange::Blueprint(value?),
+            Self::Behavior (value) => Exchange::Behavior (value?),
+        })
+    }
+}
 

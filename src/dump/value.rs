@@ -1,9 +1,26 @@
-use crate::table::{TableItem, AssocItem, iexp2};
+use crate::{
+    Exchange,
+    table::{TableItem, AssocItem, iexp2},
+};
 use super::{
     error::Error, writer::Writer,
     DumpKey, Dump, DumpTableIterator,
     Dumper as DD, KeyDumper as KDD,
 };
+
+const EXCEEDED_LOGLEN: u16 = crate::MAX_ASSOC_LOGLEN + 1;
+
+pub(crate) fn encode_blueprint<P, B>(exchange: Exchange<P, B>)
+-> Result<Exchange<Vec<u8>, Vec<u8>>, Error>
+where P: Dump, B: Dump
+{
+    fn dump<V: Dump>(value: V) -> Result<Vec<u8>, Error> {
+        let mut dumper = Dumper::new();
+        value.dump(&mut dumper)?;
+        Ok(dumper.finish())
+    }
+    exchange.map(dump, dump).transpose()
+}
 
 pub(super) struct Dumper {
     output: Writer,
@@ -64,7 +81,7 @@ impl Dumper {
             },
             (0x1_0000 ..= u32::MAX, None) |
             (0x4000 ..= u32::MAX, Some(_)) |
-            (_, Some(0x6 ..= u16::MAX)) =>
+            (_, Some(self::EXCEEDED_LOGLEN ..= u16::MAX)) =>
                 return Err(Error::from("unsupported table size")),
         }
         Ok(())

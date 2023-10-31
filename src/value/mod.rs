@@ -133,6 +133,7 @@ impl load::Builder for ValueBuilder {
         let assoc_loglen = items.assoc_loglen();
         let assoc_len = iexp2(assoc_loglen);
         let mut table = TableLoadBuilder::new(array_len, assoc_loglen);
+        table.set_last_free(items.assoc_last_free());
         let mut array_index = 0;
         let mut assoc_index = 0;
         for item in items {
@@ -162,3 +163,32 @@ impl load::Builder for ValueBuilder {
     }
 
 }
+
+#[cfg(test)]
+pub(crate) mod test {
+    use super::Value;
+
+    use crate::{test, dump, load};
+
+    #[test]
+    fn test_1_load() {
+        let decompress = load::decompress::decompress;
+        let decode = load::value::decode_blueprint::<Value, Value>;
+        let encode = dump::value::encode_blueprint::<Value, Value>;
+        let compress = dump::compress::compress;
+
+        let exchange = test::EXCHANGE_BEHAVIOR_1_UNIT;
+        let encoded = decompress(exchange)
+            .unwrap();
+        let value = decode(encoded.clone())
+            .unwrap();
+        let reencoded = encode(value)
+            .unwrap();
+        assert_eq!(encoded, reencoded);
+        let reexchange = compress(reencoded.as_deref());
+        let revalue = decode(decompress(&reexchange).unwrap()).unwrap();
+        assert_eq!(reencoded, encode(revalue).unwrap());
+    }
+
+}
+

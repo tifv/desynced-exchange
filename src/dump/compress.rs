@@ -1,6 +1,7 @@
 use flate2::write::ZlibEncoder as ZippingWriter;
 
 use crate::{
+    Exchange,
     ascii::{self, Ascii, AsciiArray},
     intlim::{Int62, Int31, encode_base62},
 };
@@ -8,18 +9,17 @@ use crate::{
 use super::{
     error::Error,
     writer::{Writer, AsciiWriter},
-    ExchangeKind,
 };
 
-pub(super) fn compress(
-    kind: ExchangeKind,
-    body: &[u8],
+pub(crate) fn compress<'b>(
+    body: Exchange<&'b [u8], &'b [u8]>,
 ) -> String {
+    let (prefix, body) = match body {
+        Exchange::Blueprint(body) => (ascii::str!("DSB"), body),
+        Exchange::Behavior (body) => (ascii::str!("DSC"), body),
+    };
     let mut writer = AsciiWriter::with_capacity(36);
-    writer.write_slice(match kind {
-        ExchangeKind::Blueprint(()) => ascii::str!("DSB"),
-        ExchangeKind::Behavior(()) => ascii::str!("DSC"),
-    });
+    writer.write_slice(prefix);
     let mut zipped = None;
     let (len, body) = if body.len() <= 32 { (0, body) } else {
         let len = body.len();

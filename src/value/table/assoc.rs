@@ -292,6 +292,16 @@ impl<V> TableLoadBuidler<V> {
         Self{table: Table::new(loglen)}
     }
     pub(super) fn finish<E: load::Error>(self) -> Result<Table<V>, E> {
+        #[allow(clippy::assertions_on_constants)]
+        { assert!(u32::BITS <= usize::BITS); }
+        if self.table.len() > u32::MAX as usize {
+            return Err(E::from(
+                "the table should not be that large" ));
+        }
+        if self.table.last_free > self.table.len() as u32 {
+            return Err(E::from(
+                "last free index should not exceed table size" ));
+        }
         let Some(items) = self.table.items.as_deref() else {
             return Ok(self.table);
         };
@@ -336,6 +346,9 @@ impl<V> TableLoadBuidler<V> {
         let index = u32_to_usize(index);
         let old_item = items[index].replace(item);
         assert!(old_item.is_none());
+    }
+    pub(super) fn set_last_free(&mut self, last_free: u32) {
+        self.table.last_free = last_free;
     }
 }
 

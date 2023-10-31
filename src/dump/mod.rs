@@ -2,13 +2,13 @@
 //! Due to the nature of serialization format, it is more serializer-driven.
 
 use crate::{
-    Exchange, ExchangeKind,
+    Exchange,
     table::{TableItem, TableSize},
 };
 
 mod writer;
-mod value;
-mod compress;
+pub(crate) mod value;
+pub(crate) mod compress;
 
 pub trait Error : std::error::Error + for<'s> From<&'s str> {}
 
@@ -85,13 +85,7 @@ pub trait Dumper : Sized {
 pub fn dump_blueprint<P, B>(exchange: Exchange<P, B>) -> Result<String, error::Error>
 where P: Dump, B: Dump
 {
-    let kind = ExchangeKind::from(&exchange);
-    let mut dumper = value::Dumper::new();
-    match exchange {
-        Exchange::Blueprint(data) => data.dump(&mut dumper)?,
-        Exchange::Behavior(data) => data.dump(&mut dumper)?,
-    }
-    let encoded_body = dumper.finish();
-    Ok(compress::compress(kind, &encoded_body))
+    let encoded_body = value::encode_blueprint(exchange)?;
+    Ok(compress::compress(encoded_body.as_deref()))
 }
 

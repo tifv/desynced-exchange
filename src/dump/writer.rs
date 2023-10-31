@@ -55,6 +55,7 @@ impl Writer {
     pub fn into_vec(self) -> Vec<u8> {
         unsafe {
             let Self{start, cursor, end} = self;
+            std::mem::forget(self);
             let len = ptr_sub(cursor, start);
             let cap = ptr_sub(end, start);
             Vec::from_raw_parts(start, len, cap)
@@ -66,7 +67,8 @@ impl Writer {
         let this = std::mem::replace(self, Self::dangling());
         let mut vec = this.into_vec();
         vec.reserve(additional);
-        Self{..} = std::mem::replace(self, Self::from_vec(vec));
+        let dangling = std::mem::replace(self, Self::from_vec(vec));
+        std::mem::forget(dangling);
     }
 
     #[inline]
@@ -108,7 +110,7 @@ impl Drop for Writer {
     #[inline]
     fn drop(&mut self) {
         let this = std::mem::replace(self, Self::dangling());
-        this.into_vec();
+        std::mem::drop(this.into_vec());
     }
 }
 

@@ -1,11 +1,30 @@
 use std::{io::Read, marker::PhantomData};
 
-use crate::table::{TableItem, AssocItem, TableSize, iexp2, u32_to_usize};
+use crate::{
+    Exchange,
+    table::{TableItem, AssocItem, TableSize, iexp2, u32_to_usize},
+};
 use super::{
     error::Error, reader::Reader,
     LoadKey, Load, LoadTableIterator,
     Loader as LL,
 };
+
+pub(crate) fn decode_blueprint<P, B>(encoded_data: Exchange<Vec<u8>,Vec<u8>>)
+-> Result<Exchange<P, B>, Error>
+where P: Load, B: Load,
+{
+    Ok(match encoded_data {
+        Exchange::Blueprint(encoded_body) =>
+            Exchange::Blueprint(P::load(
+                &mut Loader::new(Reader::from_slice(&encoded_body))
+            )?),
+        Exchange::Behavior (encoded_body) =>
+            Exchange::Behavior (B::load(
+                &mut Loader::new(Reader::from_slice(&encoded_body))
+            )?),
+    })
+}
 
 pub(super) struct Loader<'data> {
     reader: Reader<'data>,
@@ -19,6 +38,22 @@ fn error_unexpected() -> Error {
 #[cold]
 fn error_eof() -> Error {
     Error::from("unexpected end of data")
+}
+
+struct TableHeader {
+    pub array_len: u32,
+    pub assoc_loglen: Option<u16>,
+    pub assoc_last_free: u32,
+}
+
+impl TableHeader {
+    fn array(array_len: u32) -> Self {
+        Self{
+            array_len,
+            assoc_loglen: None,
+            assoc_last_free: 0,
+        }
+    }
 }
 
 impl<'data> Loader<'data> {
@@ -102,7 +137,7 @@ impl<'data> Loader<'data> {
 
     fn load_table_header( &mut self,
         head: u8,
-    ) -> Result<(u32, Option<u16>, u32), Error> {
+    ) -> Result<TableHeader, Error> {
         #![allow(clippy::cast_lossless)]
         Ok(match head {
             head @ 0x80 ..= 0x8F => {
@@ -117,17 +152,25 @@ impl<'data> Loader<'data> {
                         } else { break }
                     }
                 }
-                (
+                let assoc_loglen = Some(((head & 0x0F) >> 1) as u16);
+                let assoc_last_free = {
+                    let last_free_code = self.read_byte()?;
+                    if last_free_code & 0x01 > 0 {
+                        return Err(Error::from(
+                            "Unrecognized last free index format" ))
+                    }
+                    (last_free_code >> 1) as u32
+                };
+                TableHeader{
                     array_len,
-                    Some(((head & 0x0F) >> 1) as u16),
-                    self.read_byte()? as u32,
-                )
+                    assoc_loglen,
+                    assoc_last_free
+                }
             },
             head @ 0x90 ..= 0x9F =>
-                ((head & 0x0F) as u32, None, 0),
-            0xDC => (
+                TableHeader::array((head & 0x0F) as u32),
+            0xDC => TableHeader::array(
                 u16::from_le_bytes(self.read_array::<2>()?) as u32,
-                None, 0
             ),
             _ => return Err(error_unexpected()),
         })
@@ -161,8 +204,19 @@ impl<'data> LL for &mut Loader<'data> {
                 builder.build_string(self.load_string(head)?)
             },
             0x80 ..= 0x8F | 0x90 ..= 0x9F | 0xDC => {
-                let (array_len, assoc_loglen, assoc_last_free) =
+                let TableHeader{array_len, assoc_loglen, assoc_last_free} =
                     self.load_table_header(head)?;
+                if assoc_loglen.is_some_and(|x| x > crate::MAX_ASSOC_LOGLEN) {
+                    return Err(Error::from(
+                        "Encoded table size is too large" ));
+                }
+                let max_array_len = u32::try_from(self.reader.len())
+                    .unwrap_or(u32::MAX)
+                    .saturating_mul(8);
+                if array_len > max_array_len {
+                    return Err(Error::from(
+                        "Encoded table size is too large to be correct" ));
+                }
                 builder.build_table(SerialReader::new(
                     self,
                     array_len,

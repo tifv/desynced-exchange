@@ -151,6 +151,7 @@ pub(super) struct TableLoadBuilder<V> {
 }
 
 impl<V> TableLoadBuilder<V> {
+
     pub(super) fn new(array_len: u32, assoc_loglen: Option<u16>) -> Self {
         let mut array = Vec::with_capacity(u32_to_usize(array_len));
         array.resize_with(u32_to_usize(array_len), || None);
@@ -159,20 +160,28 @@ impl<V> TableLoadBuilder<V> {
             assoc: AssocTableLoadBuilder::new(assoc_loglen),
         }
     }
+
     pub(super) fn finish<E: load::Error>(self) -> Result<Table<V>, E> {
         let Self{array, assoc} = self;
         let assoc = assoc.finish::<E>()?;
         Ok(Table{array, assoc})
     }
+
     pub(super) fn array_insert(&mut self, index: u32, value: V) {
         //! `index` is 0-based
         let index = u32_to_usize(index);
         let old_value = self.array[index].replace(value);
         assert!(old_value.is_none());
     }
+
     pub(super) fn assoc_insert(&mut self, index: u32, item: AssocItem<V>) {
         //! `index` is 0-based
         self.assoc.insert(index, item);
     }
+
+    pub(super) fn set_last_free(&mut self, last_free: u32) {
+        self.assoc.set_last_free(last_free)
+    }
+
 }
 
