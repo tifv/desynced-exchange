@@ -6,7 +6,8 @@ pub use table::Table;
 
 use crate::{
     dump,
-    load, table::{TableItem, AssocItem, iexp2},
+    load,
+    table::{TableItem, AssocItem, iexp2},
 };
 
 use self::table::TableLoadBuilder;
@@ -42,8 +43,8 @@ impl dump::Dump for Value {
 
 impl load::LoadKey for Key {
     #[inline]
-    fn load_key<KLL: load::KeyLoader>(loader: KLL)
-    -> Result<Option<Self>, load::Error> {
+    fn load_key<KLL: load::Loader>(loader: KLL)
+    -> Result<Option<Self>, KLL::Error> {
         loader.load_key(KeyBuilder)
     }
 }
@@ -51,7 +52,7 @@ impl load::LoadKey for Key {
 impl load::Load for Value {
     #[inline]
     fn load<LL: load::Loader>(loader: LL)
-    -> Result<Self, load::Error> {
+    -> Result<Self, LL::Error> {
         loader.load_value(ValueBuilder)
     }
     #[inline]
@@ -64,15 +65,17 @@ impl load::KeyBuilder for KeyBuilder {
     type Value = Key;
 
     #[inline]
-    fn build_integer(self, value: i32) -> Result<Self::Value, load::Error> {
+    fn build_integer<E: load::Error>(self, value: i32) -> Result<Self::Value, E> {
         Ok(Key::Index(value))
     }
 
     #[inline]
-    fn build_string<R: std::io::Read>( self,
-        len: u32, mut read: R,
-    ) -> Result<Self::Value, load::Error> {
-        Ok(Key::Name(self::string::str_from_len_read(len, &mut read)?))
+    fn build_string<E: load::Error>( self,
+        value: &str
+    ) -> Result<Self::Value, E> {
+        Ok(Key::Name(
+            self::string::Str::from(value)
+        ))
     }
 }
 
@@ -83,34 +86,36 @@ impl load::Builder for ValueBuilder {
     type Value = Value;
 
     #[inline]
-    fn build_nil(self) -> Result<Self::Value, load::Error> {
+    fn build_nil<E: load::Error>(self) -> Result<Self::Value, E> {
         Ok(Value::Nil)
     }
 
     #[inline]
-    fn build_boolean(self, value: bool) -> Result<Self::Value, load::Error> {
+    fn build_boolean<E: load::Error>(self, value: bool) -> Result<Self::Value, E> {
         Ok(Value::Boolean(value))
     }
 
     #[inline]
-    fn build_integer(self, value: i32) -> Result<Self::Value, load::Error> {
+    fn build_integer<E: load::Error>(self, value: i32) -> Result<Self::Value, E> {
         Ok(Value::Integer(value))
     }
 
     #[inline]
-    fn build_float(self, value: f64) -> Result<Self::Value, load::Error> {
+    fn build_float<E: load::Error>(self, value: f64) -> Result<Self::Value, E> {
         Ok(Value::Float(value))
     }
 
     #[inline]
-    fn build_string<R: std::io::Read>( self,
-        len: u32, mut read: R,
-    ) -> Result<Self::Value, load::Error> {
-        Ok(Value::String(self::string::str_from_len_read(len, &mut read)?))
+    fn build_string<E: load::Error>( self,
+        value: &str,
+    ) -> Result<Self::Value, E> {
+        Ok(Value::String(
+            self::string::Str::from(value)
+        ))
     }
 
-    fn build_table<T>(self, items: T) -> Result<Self::Value, load::Error>
-    where T: load::LoadTableIterator<Key=Self::Key, Value=Self::Value> {
+    fn build_table<T, E: load::Error>(self, items: T) -> Result<Self::Value, E>
+    where T: load::LoadTableIterator<Key=Self::Key, Value=Self::Value, Error=E> {
         let array_len = items.array_len();
         let assoc_loglen = items.assoc_loglen();
         let assoc_len = iexp2(assoc_loglen);
@@ -140,7 +145,7 @@ impl load::Builder for ValueBuilder {
                     panic!("unexpected item"),
             }
         }
-        Ok(Value::Table(table.finish()?))
+        Ok(Value::Table(table.finish::<E>()?))
     }
 
 }

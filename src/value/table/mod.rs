@@ -135,9 +135,9 @@ impl<V> TableLoadBuilder<V> {
             assoc: AssocTableLoadBuilder::new(assoc_loglen),
         }
     }
-    pub(super) fn finish(self) -> Result<Table<V>, load::Error> {
+    pub(super) fn finish<E: load::Error>(self) -> Result<Table<V>, E> {
         let Self{array, assoc} = self;
-        let assoc = assoc.finish()?;
+        let assoc = assoc.finish::<E>()?;
         Ok(Table{array, assoc})
     }
     pub(super) fn array_insert(&mut self, index: u32, value: V) {

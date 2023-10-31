@@ -1,37 +1,40 @@
 use std::{io::Read, marker::PhantomData};
 
-use crate::table::{TableItem, AssocItem, TableSize, iexp2};
+use crate::table::{TableItem, AssocItem, TableSize, iexp2, u32_to_usize};
 use super::{
-    Error,
-    LoadKey, Load,
-    Loader as LL, KeyLoader as KLL,
-    LoadTableIterator,
+    error::Error, reader::Reader,
+    LoadKey, Load, LoadTableIterator,
+    Loader as LL,
 };
 
-pub(super) struct Loader<R: Read> {
-    reader: R,
+pub(super) struct Loader<'data> {
+    reader: Reader<'data>,
 }
 
+#[cold]
 fn error_unexpected() -> Error {
     Error::from("unexpected byte")
 }
 
-impl<R: Read> Loader<R> {
+#[cold]
+fn error_eof() -> Error {
+    Error::from("unexpected end of data")
+}
 
-    fn reborrow(&mut self) -> &mut Self {
-        self
-    }
+impl<'data> Loader<'data> {
 
     fn read_byte(&mut self) -> Result<u8, Error> {
-        let mut byte = [0; 1];
-        self.reader.read_exact(&mut byte)?;
-        Ok(byte[0])
+        self.read_array::<1>().map(|[x]| x)
     }
 
     fn read_array<const N: usize>(&mut self) -> Result<[u8; N], Error> {
-        let mut bytes = [0; N];
-        self.reader.read_exact(&mut bytes)?;
-        Ok(bytes)
+        self.reader.read_array()
+            .ok_or_else(error_eof)
+    }
+
+    fn read_slice(&mut self, len: usize) -> Result<&'data [u8], Error> {
+        self.reader.read_slice(len)
+            .ok_or_else(error_eof)
     }
 
     fn load_nil(&mut self, head: u8) -> Result<(), Error> {
@@ -81,7 +84,7 @@ impl<R: Read> Loader<R> {
 
     fn load_string( &mut self,
         head: u8,
-    ) -> Result<(u32, impl Read + '_), Error> {
+    ) -> Result<&'data str, Error> {
         #![allow(clippy::cast_lossless)]
         let len = match head {
             head @ 0xA0 ..= 0xBF => (head & 0x1F) as u32,
@@ -89,7 +92,8 @@ impl<R: Read> Loader<R> {
             0xDA => u16::from_le_bytes(self.read_array::<2>()?) as u32,
             _ => return Err(error_unexpected()),
         };
-        Ok((len, self.reader.by_ref().take(len as u64)))
+        let len = u32_to_usize(len);
+        Ok(std::str::from_utf8(self.read_slice(len)?)?)
     }
 
     fn load_table_header( &mut self,
@@ -127,7 +131,9 @@ impl<R: Read> Loader<R> {
 
 }
 
-impl<R: Read> LL for &mut Loader<R> {
+impl<'data> LL for &mut Loader<'data> {
+    type Error = Error;
+
     fn load_value<B: super::Builder>( self,
         builder: B,
     ) -> Result<B::Value, Error> {
@@ -148,8 +154,7 @@ impl<R: Read> LL for &mut Loader<R> {
             0xCB => builder.build_float(
                 self.load_float(head)? ),
             0xA0 ..= 0xBF | 0xD9 | 0xDA => {
-                let (len, reader) = self.load_string(head)?;
-                builder.build_string(len, reader)
+                builder.build_string(self.load_string(head)?)
             },
             0x80 ..= 0x8F | 0x90 ..= 0x9F | 0xDC => {
                 let (array_len, assoc_loglen, assoc_last_free) =
@@ -164,9 +169,6 @@ impl<R: Read> LL for &mut Loader<R> {
         }
     }
 
-}
-
-impl<R: Read> KLL for &mut Loader<R> {
     fn load_key<B: super::KeyBuilder>( self,
         builder: B,
     ) -> Result<Option<B::Value>, Error> {
@@ -179,16 +181,16 @@ impl<R: Read> KLL for &mut Loader<R> {
                 self.load_integer(head)?
             ).map(Some),
             0xA0 ..= 0xBF | 0xD9 | 0xDA => {
-                let (len, reader) = self.load_string(head)?;
-                builder.build_string(len, reader).map(Some)
+                builder.build_string(self.load_string(head)?).map(Some)
             },
             _ => Err(error_unexpected()),
         }
     }
+
 }
 
-struct SerialReader<'l, R: Read, K: LoadKey, V: Load> {
-    loader: &'l mut Loader<R>,
+struct SerialReader<'l, 'data: 'l, K: LoadKey, V: Load> {
+    loader: &'l mut Loader<'data>,
     array_len: u32,
     assoc_loglen: Option<u16>,
     assoc_last_free: u32,
@@ -197,11 +199,11 @@ struct SerialReader<'l, R: Read, K: LoadKey, V: Load> {
     output: PhantomData<TableItem<K, V>>,
 }
 
-impl<'l, R, K, V> SerialReader<'l, R, K, V>
-where R: Read, K: LoadKey, V: Load,
+impl<'l, 'data: 'l, K, V> SerialReader<'l, 'data, K, V>
+where K: LoadKey, V: Load,
 {
     fn new(
-        loader: &'l mut Loader<R>,
+        loader: &'l mut Loader<'data>,
         array_len: u32,
         assoc_loglen: Option<u16>, assoc_last_free: u32,
     ) -> Self {
@@ -229,15 +231,15 @@ where R: Read, K: LoadKey, V: Load,
         if self.next_is_masked()? {
             return Ok(None);
         }
-        let value = V::load(self.loader.reborrow())?;
+        let value = V::load(&mut *self.loader)?;
         Ok(Some(TableItem::Array(value)))
     }
     fn read_assoc_item(&mut self) -> Result<Option<TableItem<K, V>>, Error> {
         if self.next_is_masked()? {
             return Ok(None);
         }
-        let value = V::load(self.loader.reborrow())?;
-        let key = K::load_key(self.loader.reborrow())?;
+        let value = V::load(&mut *self.loader)?;
+        let key = K::load_key(&mut *self.loader)?;
         let link_code = self.loader.read_byte()?;
         if link_code & 0x01 > 0 {
             return Err(Error::from("unexpected link code"));
@@ -258,8 +260,8 @@ where R: Read, K: LoadKey, V: Load,
     }
 }
 
-impl<'l, R, K, V> TableSize for SerialReader<'l, R, K, V>
-where R: Read, K: LoadKey, V: Load,
+impl<'l, 'data: 'l, K, V> TableSize for SerialReader<'l, 'data, K, V>
+where K: LoadKey, V: Load,
 {
     fn array_len(&self) -> u32 {
         self.array_len
@@ -272,8 +274,8 @@ where R: Read, K: LoadKey, V: Load,
     }
 }
 
-impl<'l, R, K, V> Iterator for SerialReader<'l, R, K, V>
-where R: Read, K: LoadKey, V: Load,
+impl<'l, 'data: 'l, K, V> Iterator for SerialReader<'l, 'data, K, V>
+where K: LoadKey, V: Load,
 {
     type Item = Result<Option<TableItem<K, V>>, Error>;
     fn next(&mut self) -> Option<Self::Item> {
@@ -289,10 +291,11 @@ where R: Read, K: LoadKey, V: Load,
     }
 }
 
-impl<'l, R, K, V> LoadTableIterator for SerialReader<'l, R, K, V>
-where R: Read, K: LoadKey, V: Load,
+impl<'l, 'data: 'l, K, V> LoadTableIterator for SerialReader<'l, 'data, K, V>
+where K: LoadKey, V: Load,
 {
     type Key = K;
     type Value = V;
+    type Error = Error;
 }
 

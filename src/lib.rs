@@ -302,6 +302,7 @@
 // pub mod iterpower;
 
 mod ascii;
+mod intlim;
 
 mod table;
 

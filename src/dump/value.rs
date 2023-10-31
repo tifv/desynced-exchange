@@ -19,8 +19,6 @@ impl Dumper {
         self.output.into_vec()
     }
 
-    fn reborrow(&mut self) -> &mut Self { self }
-
     #[inline]
     fn write_byte(&mut self, value: u8) {
         self.output.write_byte(value);
@@ -256,7 +254,7 @@ where
             let Some(item) = item.take() else { continue };
             let (key, value, link) = match item {
                 TableItem::Array(value) => {
-                    value.dump(self.dumper.reborrow())?;
+                    value.dump(&mut *self.dumper)?;
                     continue;
                 },
                 TableItem::Assoc(AssocItem::Dead{link}) =>
@@ -265,14 +263,14 @@ where
                     (Some(key), Some(value), link),
             };
             if let Some(value) = value {
-                value.dump(self.dumper.reborrow())?;
+                value.dump(&mut *self.dumper)?;
             } else {
                 self.dumper.dump_nil()?;
             }
             match key {
                 // None => self.ser.serialize_dead()?,
                 None => self.dumper.dump_dead_key(),
-                Some(key) => key.dump_key(self.dumper.reborrow())?,
+                Some(key) => key.dump_key(&mut *self.dumper)?,
             }
             self.dumper.write_byte(match Self::encode_link(link) {
                 Some(code) => code,

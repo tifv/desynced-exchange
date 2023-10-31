@@ -9,7 +9,7 @@ use thiserror::Error;
 pub(crate) struct AsciiError;
 
 /// A byte that holds ASCII value.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
 pub(crate) struct Ascii(u8);
 
@@ -182,6 +182,17 @@ impl<'s> From<&'s AsciiStr> for &'s str {
 
 #[repr(transparent)]
 pub(crate) struct AsciiArray<const N: usize>(pub [Ascii; N]);
+
+impl<const N: usize> AsciiArray<N> {
+    pub(crate) unsafe fn from_bytes_unchecked(
+        value: [u8; N],
+    ) -> AsciiArray<N> {
+        //! # Safety
+        //! The caller guarantees that the value contains bytes within
+        //! the ASCII range.
+        AsciiArray(value.map(Ascii))
+    }
+}
 
 impl<const N: usize> std::ops::Deref for AsciiArray<N> {
     type Target = [Ascii; N];

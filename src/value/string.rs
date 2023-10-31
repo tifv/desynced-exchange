@@ -1,16 +1,9 @@
-use crate::table::u32_to_usize;
+use crate::{
+    load,
+    table::u32_to_usize,
+};
 
 pub type Str = String;
-
-pub(crate) fn str_from_len_read<R: std::io::Read>(
-    len: u32,
-    read: &mut R,
-) -> Result<Str, crate::load::Error> {
-    let len = u32_to_usize(len);
-    let mut buffer = vec![0; len];
-    read.read_exact(&mut buffer)?;
-    Ok(String::from_utf8(buffer)?)
-}
 
 /*
 

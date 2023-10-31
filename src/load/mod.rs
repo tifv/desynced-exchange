@@ -2,102 +2,105 @@
 
 use std::io::Read;
 
-use thiserror::Error;
-
 use crate::{
-    Exchange,
+    Exchange, ExchangeKind,
     table::{TableItem, TableSize},
 };
 
+mod reader;
 mod value;
-mod compress;
+mod decompress;
 
-#[derive(Debug, Error)]
-#[error("Load error: {reason}")]
-pub struct Error {
-    reason: String,
-}
+pub trait Error : std::error::Error + for<'s> From<&'s str> {}
 
-impl From<&str> for Error {
-    fn from(reason: &str) -> Self {
-        Self{reason: String::from(reason)}
+pub mod error {
+    use thiserror::Error;
+
+    #[derive(Debug, Error)]
+    #[error("Load error: {reason}")]
+    pub struct Error {
+        reason: String,
     }
-}
 
-impl From<String> for Error {
-    fn from(reason: String) -> Self {
-        Self{reason}
-    }
-}
-
-macro_rules! error_from_error {
-    ($type:ty) => {
-        impl From<$type> for Error {
-            fn from(value: $type) -> Self {
-                Self::from(value.to_string())
-            }
+    impl From<&str> for Error {
+        fn from(reason: &str) -> Self {
+            Self{reason: String::from(reason)}
         }
-    };
-}
+    }
 
-error_from_error!(std::num::TryFromIntError);
-error_from_error!(std::io::Error);
-error_from_error!(std::string::FromUtf8Error);
+    impl From<String> for Error {
+        fn from(reason: String) -> Self {
+            Self{reason}
+        }
+    }
 
-pub fn load_blueprint<P, B>(data: &str) -> Result<Exchange<P, B>, Error>
-where P: Load, B: Load,
-{
-    todo!()
+    macro_rules! error_from_error {
+        ($type:ty) => {
+            impl From<$type> for Error {
+                fn from(value: $type) -> Self {
+                    Self::from(value.to_string())
+                }
+            }
+        };
+    }
+
+    error_from_error!(crate::ascii::AsciiError);
+    error_from_error!(crate::intlim::IntLimError);
+    error_from_error!(std::str::Utf8Error);
+    error_from_error!(std::io::Error);
+
+    impl super::Error for Error {}
+
 }
 
 pub trait LoadKey : Sized {
-    fn load_key<L: KeyLoader>(loader: L) -> Result<Option<Self>, Error>;
+    fn load_key<L: Loader>(loader: L) -> Result<Option<Self>, L::Error>;
 }
 
 pub trait Load : Sized {
-    fn load<L: Loader>(loader: L) -> Result<Self, Error>;
+    fn load<L: Loader>(loader: L) -> Result<Self, L::Error>;
     fn is_nil(&self) -> bool;
 }
 
 pub trait LoadTableIterator : TableSize + Iterator<
-    Item=Result<Option<TableItem<Self::Key, Self::Value>>, Error> >
+    Item=Result<Option<TableItem<Self::Key, Self::Value>>, Self::Error> >
 {
     type Key: LoadKey;
     type Value: Load;
+    type Error: Error;
 }
 
 pub trait KeyBuilder : Sized {
     type Value: LoadKey;
-    fn build_integer(self, value: i32) -> Result<Self::Value, Error>;
-    fn build_string<R: Read>( self,
-        len: u32, value: R,
-    ) -> Result<Self::Value, Error>;
+    fn build_integer<E: Error>(self, value: i32) -> Result<Self::Value, E>;
+    fn build_string<E: Error>(self, value: &str) -> Result<Self::Value, E>;
 }
 
 pub trait Builder : Sized {
     type Key: LoadKey;
     type Value: Load;
-    fn build_nil(self) -> Result<Self::Value, Error>;
-    fn build_boolean(self, value: bool) -> Result<Self::Value, Error>;
-    fn build_integer(self, value: i32) -> Result<Self::Value, Error>;
-    fn build_float(self, value: f64) -> Result<Self::Value, Error>;
-    fn build_string<R: Read>( self,
-        len: u32, value: R,
-    ) -> Result<Self::Value, Error>;
-    fn build_table<T>(self, items: T) -> Result<Self::Value, Error>
-    where T: LoadTableIterator<Key=Self::Key, Value=Self::Value>;
+    fn build_nil<E: Error>(self) -> Result<Self::Value, E>;
+    fn build_boolean<E: Error>(self, value: bool) -> Result<Self::Value, E>;
+    fn build_integer<E: Error>(self, value: i32) -> Result<Self::Value, E>;
+    fn build_float<E: Error>(self, value: f64) -> Result<Self::Value, E>;
+    fn build_string<E: Error>(self, value: &str) -> Result<Self::Value, E>;
+    fn build_table<T, E: Error>(self, items: T) -> Result<Self::Value, E>
+    where T: LoadTableIterator<Key=Self::Key, Value=Self::Value, Error=E>;
 }
 
 pub trait Loader {
+    type Error: Error;
     fn load_value<B: Builder>( self,
         builder: B,
-    ) -> Result<B::Value, Error>;
-}
-
-pub trait KeyLoader : Loader {
+    ) -> Result<B::Value, Self::Error>;
     fn load_key<B: KeyBuilder>( self,
         builder: B,
-    ) -> Result<Option<B::Value>, Error>;
+    ) -> Result<Option<B::Value>, Self::Error>;
 }
 
+pub fn load_blueprint<P, B>(data: &str) -> Result<Exchange<P, B>, error::Error>
+where P: Load, B: Load,
+{
+    todo!()
+}
 

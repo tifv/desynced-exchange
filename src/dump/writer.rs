@@ -70,6 +70,11 @@ impl Writer {
     }
 
     #[inline]
+    fn free_cap(&self) -> usize {
+        unsafe { ptr_sub(self.end, self.cursor) }
+    }
+
+    #[inline]
     pub fn write_byte(&mut self, value: u8) {
         self.write_array::<1>([value])
     }
@@ -77,7 +82,7 @@ impl Writer {
     #[inline]
     pub fn write_array<const N: usize>(&mut self, value: [u8; N]) {
         unsafe {
-            if ptr_sub(self.cursor, self.start) < N {
+            if self.free_cap() < N {
                 self.reserve(N);
             }
             self.cursor.cast::<[u8; N]>().write(value);
@@ -89,7 +94,7 @@ impl Writer {
     pub fn write_slice(&mut self, value: &[u8]) {
         let len = value.len();
         unsafe {
-            if ptr_sub(self.cursor, self.start) < len {
+            if self.free_cap() < len {
                 self.reserve(len);
             }
             std::ptr::copy_nonoverlapping(value.as_ptr(), self.cursor, len);
@@ -148,5 +153,4 @@ impl AsciiWriter {
     }
 
 }
-
 

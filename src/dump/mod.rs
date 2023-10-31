@@ -23,7 +23,7 @@ pub mod error {
 
     impl<'s> From<&'s str> for Error {
         fn from(reason: &'s str) -> Self {
-            Self{reason: String::from(reason)}
+            Self::from(String::from(reason))
         }
     }
 
@@ -32,18 +32,6 @@ pub mod error {
             Self{reason}
         }
     }
-
-    macro_rules! error_from_error {
-        ($type:ty) => {
-            impl From<$type> for Error {
-                fn from(value: $type) -> Self {
-                    Self::from(value.to_string())
-                }
-            }
-        };
-    }
-
-    error_from_error!(std::io::Error);
 
     impl super::Error for Error {}
 

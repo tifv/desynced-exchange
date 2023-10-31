@@ -291,7 +291,7 @@ impl<V> TableLoadBuidler<V> {
     pub(super) fn new(loglen: Option<u16>) -> Self {
         Self{table: Table::new(loglen)}
     }
-    pub(super) fn finish(self) -> Result<Table<V>, load::Error> {
+    pub(super) fn finish<E: load::Error>(self) -> Result<Table<V>, E> {
         let Some(items) = self.table.items.as_deref() else {
             return Ok(self.table);
         };
@@ -317,7 +317,7 @@ impl<V> TableLoadBuidler<V> {
                 index = index.wrapping_add((link as isize) as usize);
                 steps += 1;
                 if steps >= len {
-                    return Err(load::Error::from(
+                    return Err(E::from(
                         "node chain should not form a loop" ));
                 }
             }
@@ -325,11 +325,10 @@ impl<V> TableLoadBuidler<V> {
         for position in 0 .. len {
             let mut index = u32_to_usize(position);
             if unvalidated[index].is_some() {
-                return Err(load::Error::from(
+                return Err(E::from(
                     "table key should be in a valid position" ));
             }
         }
-        todo!();
         Ok(self.table)
     }
     pub(super) fn insert(&mut self, index: u32, item: Item<V>) {
@@ -339,6 +338,4 @@ impl<V> TableLoadBuidler<V> {
         assert!(old_item.is_none());
     }
 }
-
-pub(super) struct TableDumpBuidler<V>(Table<V>);
 
