@@ -314,6 +314,7 @@ mod value;
 mod load;
 mod dump;
 
+#[derive(Debug)]
 pub enum Exchange<P, B> {
     Blueprint(P),
     Behavior(B),

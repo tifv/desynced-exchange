@@ -23,6 +23,10 @@ fn error_eof() -> Error {
 
 impl<'data> Loader<'data> {
 
+    pub(super) fn new(reader: Reader<'data>) -> Self {
+        Self{reader}
+    }
+
     fn read_byte(&mut self) -> Result<u8, Error> {
         self.read_array::<1>().map(|[x]| x)
     }

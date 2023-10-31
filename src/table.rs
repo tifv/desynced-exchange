@@ -10,9 +10,22 @@ pub enum Key<I: Borrow<i32>, S: Borrow<str>> {
     Name(S),
 }
 
+impl<I, S> std::fmt::Debug for Key<I, S>
+where I: Borrow<i32>, S: Borrow<str>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Index(index) => index.borrow().fmt(f),
+            Self::Name(name) => name.borrow().fmt(f),
+        }
+    }
+}
+
 pub type KeyRef<'s> = Key<i32, &'s str>;
 
-impl<I: Borrow<i32>, S: Borrow<str>> Key<I, S> {
+impl<I, S> Key<I, S>
+where I: Borrow<i32>, S: Borrow<str>,
+{
     #[inline]
     pub fn as_ref(&self) -> KeyRef<'_> {
         match *self {
@@ -23,7 +36,7 @@ impl<I: Borrow<i32>, S: Borrow<str>> Key<I, S> {
 }
 
 impl<I, S> crate::dump::DumpKey for Key<I, S>
-where I: Borrow<i32>, S: Borrow<str>
+where I: Borrow<i32>, S: Borrow<str>,
 {
     fn dump_key<DD: crate::dump::KeyDumper>(&self, dumper: DD)
     -> Result<DD::Ok, DD::Error> {
@@ -61,7 +74,7 @@ impl<K, V> TableItem<K, V> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub enum AssocItem<K, V> {
     Dead{link: i32},
     Live{value: V, key: K, link: i32},
@@ -86,6 +99,30 @@ impl<K, V> AssocItem<K, V> {
             Self::Live{value, key, link} =>
                 AssocItem::Live{value: valuef(value), key: keyf(key), link},
         }
+    }
+}
+
+impl<K, V> std::fmt::Debug for AssocItem<K, V>
+where K: std::fmt::Debug, V: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let link = match self {
+            Self::Dead{link} => {
+                f.write_str("🕱")?;
+                *link
+            },
+            Self::Live{value, key, link} => {
+                key.fmt(f)?;
+                f.write_str(": ")?;
+                value.fmt(f)?;
+                *link
+            },
+        };
+        if link > 0 {
+            f.write_str(" *")?;
+            link.fmt(f)?;
+        }
+        Ok(())
     }
 }
 

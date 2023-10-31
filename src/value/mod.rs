@@ -21,6 +21,19 @@ pub enum Value {
     Table(Table<Value>)
 }
 
+impl std::fmt::Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Nil => f.write_str("nil"),
+            Self::Boolean(value) => value.fmt(f),
+            Self::Integer(value) => value.fmt(f),
+            Self::Float(value) => value.fmt(f),
+            Self::String(value) => value.fmt(f),
+            Self::Table(table) => table.fmt(f),
+        }
+    }
+}
+
 type Key = crate::table::Key<i32, Str>;
 
 impl dump::Dump for Value {

@@ -17,7 +17,6 @@ use super::Str;
 use self::assoc::{
     Table as AssocTable, Item as AssocItem,
     TableLoadBuidler as AssocTableLoadBuilder,
-    TableDumpBuidler as AssocTableDumpBuilder,
 };
 
 type Key = GenericKey<i32, Str>;
@@ -26,6 +25,31 @@ type Key = GenericKey<i32, Str>;
 pub struct Table<V> {
     array: Vec<Option<V>>,
     assoc: AssocTable<V>,
+}
+
+impl<V> std::fmt::Debug for Table<V>
+where V: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        struct NilEntry;
+        impl std::fmt::Debug for NilEntry {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                Ok(())
+            }
+        }
+        let mut map = f.debug_set();
+        for item in self.dump_iter() {
+            let Some(item) = item else {
+                map.entry(&NilEntry);
+                continue;
+            };
+            match item {
+                TableItem::Array(value) => map.entry(value),
+                TableItem::Assoc(item) => map.entry(&item),
+            };
+        }
+        map.finish()
+    }
 }
 
 impl<V> Table<V> {

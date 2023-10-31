@@ -106,7 +106,7 @@ const fn mask(loglen: u16) -> u32 {
     iexp2(Some(loglen)) - 1
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(super) struct Table<V> {
     // invariant: if `items` is Some than `items.len()`` is a power of two
     items: Option<Box<[Option<Item<V>>]>>,

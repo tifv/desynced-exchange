@@ -165,9 +165,9 @@ impl Int62 {
     pub(super) fn try_as_31(self) -> Result<Int31, Int31> {
         match self.0 {
             // SAFETY: `b` lies in range
-            b @  0 ..= 30 => Ok(unsafe { Int31::new_unchecked(b) }),
+            b @  0 ..= 30 => Ok (unsafe { Int31::new_unchecked(b) }),
             // SAFETY: `b - 31` lies in range
-            b @ 31 ..= 61 => Ok(unsafe { Int31::new_unchecked(b - 31) }),
+            b @ 31 ..= 61 => Err(unsafe { Int31::new_unchecked(b - 31) }),
             // SAFETY: `Int62` struct invariant
             62 ..= u8::MAX => unsafe { unreachable_unchecked() }
         }

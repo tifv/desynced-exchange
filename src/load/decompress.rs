@@ -120,7 +120,7 @@ impl<'r> Base62Decoder<'r> {
         Ok(Int62::divrem(checksum.0).1)
     }
     fn emit_word(&mut self) -> Result<Option<u32>, Error> {
-        let Some(array) = self.reader.read_array::<6>() else {
+        let Some(array) = self.reader.read_array::<ENCODED_WORD_LEN>() else {
             return Ok(None)
         };
         let word = Self::decode_word(&array)?;
@@ -134,7 +134,7 @@ impl<'r> Base62Decoder<'r> {
         Ok(word)
     }
     fn decode_word(value: &[Ascii]) -> Result<u32, Error> {
-        assert!(value.len() < ENCODED_WORD_LEN);
+        assert!(value.len() <= ENCODED_WORD_LEN);
         let start = ENCODED_WORD_LEN - value.len();
         let mut buffer = [Int62::zero(); ENCODED_WORD_LEN];
         for (&c, x_mut) in std::iter::zip(
