@@ -306,13 +306,10 @@ mod intlim;
 
 mod table;
 
-mod value;
-
-// mod ser;
-// mod de;
-
 mod load;
 mod dump;
+
+mod value;
 
 mod test;
 
