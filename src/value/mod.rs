@@ -1,45 +1,38 @@
-mod string;
 mod table;
 
-pub use string::Str;
-pub use table::Table;
+pub use table::{Key, Table};
 
 use crate::{
     dump,
     load,
-    table::{TableItem, AssocItem, iexp2},
+    table::{TableItem, iexp2},
 };
 
 use self::table::TableLoadBuilder;
 
 pub enum Value {
-    Nil,
     Boolean(bool),
     Integer(i32),
     Float(f64),
-    String(Str),
+    String(String),
     Table(Table<Value>)
 }
 
 impl std::fmt::Debug for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Nil => f.write_str("nil"),
             Self::Boolean(value) => value.fmt(f),
             Self::Integer(value) => value.fmt(f),
-            Self::Float(value) => value.fmt(f),
-            Self::String(value) => value.fmt(f),
-            Self::Table(table) => table.fmt(f),
+            Self::Float  (value) => value.fmt(f),
+            Self::String (value) => value.fmt(f),
+            Self::Table  (table) => table.fmt(f),
         }
     }
 }
 
-type Key = crate::table::Key<i32, Str>;
-
 impl dump::Dump for Value {
     fn dump<DD: dump::Dumper>(&self, dumper: DD) -> Result<DD::Ok, DD::Error> {
         match *self {
-            Self::Nil => dumper.dump_nil(),
             Self::Boolean(value) =>
                 dumper.dump_boolean(value),
             Self::Integer(value) =>
@@ -63,76 +56,74 @@ impl load::LoadKey for Key {
 }
 
 impl load::Load for Value {
-    #[inline]
-    fn load<LL: load::Loader>(loader: LL)
-    -> Result<Self, LL::Error> {
+    fn load<L: load::Loader>(loader: L) -> Result<Option<Self>, L::Error> {
         loader.load_value(ValueBuilder)
     }
-    #[inline]
-    fn is_nil(&self) -> bool { matches!(self, Self::Nil) }
 }
 
 struct KeyBuilder;
 
 impl load::KeyBuilder for KeyBuilder {
-    type Value = Key;
+    type Output = Key;
 
     #[inline]
-    fn build_integer<E: load::Error>(self, value: i32) -> Result<Self::Value, E> {
+    fn build_integer<E: load::Error>( self,
+        value: i32,
+    ) -> Result<Self::Output, E> {
         Ok(Key::Index(value))
     }
 
     #[inline]
     fn build_string<E: load::Error>( self,
-        value: &str
-    ) -> Result<Self::Value, E> {
+        value: &str,
+    ) -> Result<Self::Output, E> {
         Ok(Key::Name(
-            self::string::Str::from(value)
+            String::from(value)
         ))
     }
 }
 
-struct ValueBuilder;
+pub struct ValueBuilder;
 
 impl load::Builder for ValueBuilder {
+    type Output = Value;
     type Key = Key;
     type Value = Value;
 
     #[inline]
-    fn build_nil<E: load::Error>(self) -> Result<Self::Value, E> {
-        Ok(Value::Nil)
+    fn build_boolean<E: load::Error>( self,
+        value: bool,
+    ) -> Result<Option<Value>, E> {
+        Ok(Some(Value::Boolean(value)))
     }
 
     #[inline]
-    fn build_boolean<E: load::Error>(self, value: bool) -> Result<Self::Value, E> {
-        Ok(Value::Boolean(value))
+    fn build_integer<E: load::Error>( self,
+        value: i32,
+    ) -> Result<Option<Value>, E> {
+        Ok(Some(Value::Integer(value)))
     }
 
     #[inline]
-    fn build_integer<E: load::Error>(self, value: i32) -> Result<Self::Value, E> {
-        Ok(Value::Integer(value))
-    }
-
-    #[inline]
-    fn build_float<E: load::Error>(self, value: f64) -> Result<Self::Value, E> {
-        Ok(Value::Float(value))
+    fn build_float<E: load::Error>( self,
+        value: f64,
+    ) -> Result<Option<Value>, E> {
+        Ok(Some(Value::Float(value)))
     }
 
     #[inline]
     fn build_string<E: load::Error>( self,
         value: &str,
-    ) -> Result<Self::Value, E> {
-        Ok(Value::String(
-            self::string::Str::from(value)
-        ))
+    ) -> Result<Option<Value>, E> {
+        Ok(Some(Value::String(String::from(value))))
     }
 
-    fn build_table<T, E: load::Error>(self, items: T) -> Result<Self::Value, E>
-    where T: load::LoadTableIterator<Key=Self::Key, Value=Self::Value, Error=E> {
+    fn build_table<T, E: load::Error>(self, items: T) -> Result<Option<Value>, E>
+    where T: load::LoadTableIterator<Key=Key, Value=Value, Error=E> {
         let array_len = items.array_len();
         let assoc_loglen = items.assoc_loglen();
         let assoc_len = iexp2(assoc_loglen);
-        let mut table = TableLoadBuilder::new(array_len, assoc_loglen);
+        let mut table = TableLoadBuilder::<Value>::new(array_len, assoc_loglen);
         table.set_last_free(items.assoc_last_free());
         let mut array_index = 0;
         let mut assoc_index = 0;
@@ -159,14 +150,14 @@ impl load::Builder for ValueBuilder {
                     panic!("unexpected item"),
             }
         }
-        Ok(Value::Table(table.finish::<E>()?))
+        Ok(Some(Value::Table(table.finish::<E>()?)))
     }
 
 }
 
 #[cfg(test)]
 pub(crate) mod test {
-    use super::Value;
+    type Value = super::Value;
 
     use crate::{test, dump, load};
 
@@ -188,6 +179,12 @@ pub(crate) mod test {
         let reexchange = compress(reencoded.as_deref());
         let revalue = decode(decompress(&reexchange).unwrap()).unwrap();
         assert_eq!(reencoded, encode(revalue).unwrap());
+    }
+
+    #[test]
+    fn test_2_load() {
+        let exchange = test::EXCHANGE_BEHAVIOR_2;
+        load::load_blueprint::<Value, Value>(exchange).unwrap();
     }
 
 }

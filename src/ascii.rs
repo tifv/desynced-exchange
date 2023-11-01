@@ -263,6 +263,26 @@ impl std::ops::DerefMut for AsciiString {
     fn deref_mut(&mut self) -> &mut Vec<Ascii> { &mut self.0 }
 }
 
+impl TryFrom<Vec<u8>> for AsciiString {
+    type Error = AsciiError;
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        value.is_ascii().then(|| {
+            // SAFETY: we just checked for ASCII values
+            unsafe { AsciiString::from_bytes_unchecked(value) }
+        } ).ok_or(AsciiError)
+    }
+}
+
+impl TryFrom<String> for AsciiString {
+    type Error = AsciiError;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.is_ascii().then(|| {
+            // SAFETY: we just checked for ASCII values
+            unsafe { AsciiString::from_string_unchecked(value) }
+        } ).ok_or(AsciiError)
+    }
+}
+
 impl From<AsciiString> for Vec<u8> {
     fn from(value: AsciiString) -> Vec<u8> {
         // SAFETY: `Ascii` is transparent to `u8`

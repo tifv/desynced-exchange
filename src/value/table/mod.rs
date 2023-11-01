@@ -1,25 +1,24 @@
-mod assoc;
+use std::collections::{HashMap, HashSet};
 
-use std::{iter::Enumerate, mem::MaybeUninit};
+mod assoc;
 
 use crate::{
     table::{
-        Key as GenericKey, KeyRef,
+        KeyRef,
         TableItem,
         u32_to_usize,
     },
-    dump::{self, DumpKey, Dump, Dumper, KeyDumper},
+    dump::Dump,
     load,
 };
 
-use super::Str;
-
 use self::assoc::{
     Table as AssocTable, Item as AssocItem,
-    TableLoadBuidler as AssocTableLoadBuilder,
+    TableLoadBuilder as AssocTableLoadBuilder,
+    TableDumpBuilder as AssocTableDumpBuilder,
 };
 
-type Key = GenericKey<i32, Str>;
+pub use crate::table::KeyOwned as Key;
 
 #[derive(Clone)]
 pub struct Table<V> {
@@ -31,9 +30,10 @@ impl<V> std::fmt::Debug for Table<V>
 where V: std::fmt::Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use std::fmt;
         struct NilEntry;
-        impl std::fmt::Debug for NilEntry {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        impl fmt::Debug for NilEntry {
+            fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 Ok(())
             }
         }
@@ -53,6 +53,18 @@ where V: std::fmt::Debug,
 }
 
 impl<V> Table<V> {
+
+    #[must_use]
+    pub fn builder() -> TableBuilder<V> {
+        TableBuilder::new()
+    }
+
+    #[must_use]
+    pub fn assoc_builder(loglen: Option<u16>) -> AssocTableBuilder<V> {
+        AssocTableBuilder::new(loglen)
+    }
+
+    #[must_use]
     pub fn dump_iter(&self) -> TableDumpIter<'_, V>
     {
         TableDumpIter{
@@ -93,23 +105,27 @@ impl<'s, V> Iterator for TableDumpIter<'s, V> {
 }
 
 impl<'s, V> crate::table::TableSize for TableDumpIter<'s, V> {
+
+    #[must_use]
     fn array_len(&self) -> u32 {
         let Some(array) = &self.array else { return 0 };
         array.len().try_into().unwrap()
     }
 
+    #[must_use]
     fn assoc_loglen(&self) -> Option<u16> {
         self.assoc.loglen()
     }
 
+    #[must_use]
     fn assoc_last_free(&self) -> u32 {
         self.assoc.last_free()
     }
 }
 
-impl<'s, V: Dump> crate::dump::DumpTableIterator for TableDumpIter<'s, V> {
+impl<'s, V: Dump> crate::dump::DumpTableIterator<'s> for TableDumpIter<'s, V> {
     type Key = KeyRef<'s>;
-    type Value = &'s V;
+    type Value = V;
 }
 
 /*
@@ -152,6 +168,7 @@ pub(super) struct TableLoadBuilder<V> {
 
 impl<V> TableLoadBuilder<V> {
 
+    #[must_use]
     pub(super) fn new(array_len: u32, assoc_loglen: Option<u16>) -> Self {
         let mut array = Vec::with_capacity(u32_to_usize(array_len));
         array.resize_with(u32_to_usize(array_len), || None);
@@ -181,6 +198,78 @@ impl<V> TableLoadBuilder<V> {
 
     pub(super) fn set_last_free(&mut self, last_free: u32) {
         self.assoc.set_last_free(last_free)
+    }
+
+}
+
+pub struct TableBuilder<V> {
+    values: HashMap<Key, V>,
+    dead_keys: HashSet<Key>,
+}
+
+impl<V> TableBuilder<V> {
+
+    #[must_use]
+    fn new() -> Self {
+        Self{
+            values: HashMap::new(),
+            dead_keys: HashSet::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn finish(self) -> Table<V> {
+        todo!()
+    }
+
+    pub fn insert(&mut self, key: Key, value: Option<V>) {
+        todo!()
+    }
+
+    pub fn insert_name(&mut self, key: &'static str, value: Option<V>) {
+        self.insert(Key::from(key), value)
+    }
+
+    pub fn insert_assoc_dead(&mut self, key: Key) {
+        todo!()
+    }
+
+    pub fn insert_assoc_dead_name(&mut self, key: &'static str) {
+        self.insert_assoc_dead(Key::from(key))
+    }
+
+}
+
+pub struct AssocTableBuilder<V> {
+    table: AssocTableDumpBuilder<V>,
+}
+
+impl<V> AssocTableBuilder<V> {
+
+    #[must_use]
+    fn new(loglen: Option<u16>) -> Self {
+        Self{table: AssocTableDumpBuilder::new(loglen)}
+    }
+
+    #[must_use]
+    pub fn finish(self) -> Table<V> {
+        Table { array: Vec::new(), assoc: self.table.finish() }
+    }
+
+    pub fn insert(&mut self, key: Key, value: Option<V>) {
+        self.table.insert(key, value)
+    }
+
+    pub fn insert_name(&mut self, key: &'static str, value: Option<V>) {
+        self.insert(Key::from(key), value)
+    }
+
+    pub fn insert_dead(&mut self, key: Key) {
+        self.table.insert_dead(key)
+    }
+
+    pub fn insert_dead_name(&mut self, key: &'static str) {
+        self.insert_dead(Key::from(key))
     }
 
 }

@@ -1,10 +1,7 @@
 //! Associative part of the tables
 
-use std::marker::PhantomData;
-
 use crate::{
     table::{ilog2_exact, iexp2, u32_to_usize},
-    value::Str,
     load,
 };
 use super::{Key, KeyRef};
@@ -47,27 +44,24 @@ pub(crate) const fn int_table_hash(value: i32, loglen: u16) -> u32 {
 
 pub(crate) type Item<V> = crate::table::AssocItem<Key, V>;
 
-pub(crate) enum InsertItem<V> {
-    Dead{position: u32},
-    Live{key: Key, value: V},
+impl<'s> KeyRef<'s> {
+    #[inline]
+    fn position(self, loglen: u16) -> u32 {
+        match self {
+            Self::Index(index) => int_table_hash(index, loglen),
+            Self::Name(value) => str_table_hash(value) & mask(loglen),
+        }
+    }
 }
 
 impl Key {
+    #[inline]
     fn position(&self, loglen: u16) -> u32 {
-        match *self {
-            Self::Index(index) => int_table_hash(index, loglen),
-            Self::Name(ref value) => str_table_hash(value) & mask(loglen),
-        }
+        self.as_ref().position(loglen)
     }
 }
 
 impl<V> Item<V> {
-    fn from_insert(item: InsertItem<V>, link: i32) -> Self {
-        match item {
-            InsertItem::Dead{..} => Self::Dead{link: 0},
-            InsertItem::Live{key, value} => Self::Live{value, key, link: 0},
-        }
-    }
     fn main_position(&self, loglen: u16) -> Option<u32> {
         match self {
             Self::Dead{..} => None,
@@ -86,18 +80,6 @@ impl<V> Item<V> {
             Self::Live { link, .. } | Self::Dead { link } => link,
         };
         *link_mut = new_link;
-    }
-}
-
-impl<V> InsertItem<V> {
-    pub fn dead_from_str(value: &str) -> Self {
-        Self::Dead{position: str_table_hash(value)}
-    }
-    fn position(&self, loglen: u16) -> u32 {
-        match *self {
-            Self::Dead{position} => position & mask(loglen),
-            Self::Live{ref key, ..} => key.position(loglen),
-        }
     }
 }
 
@@ -139,70 +121,6 @@ impl<V> Table<V> {
 }
 
 impl<V> Table<V> {
-    pub fn insert( &mut self,
-        item: InsertItem<V>,
-    ) {
-        let loglen = self.loglen().expect("the table should have free space");
-        let main_index = item.position(loglen);
-        if let free @ None = &mut self[main_index] {
-            // Lua here would fill dead position as well as free.
-            // But we are not Lua: we do not normally make dead positions,
-            // and when we do, we don't want to overwrite them.
-            *free = Some(Item::from_insert(item, 0));
-            return;
-        }
-        let Some(free_index) = self.find_free_index() else {
-            unreachable!("the table should have free space");
-        };
-        let other_index = self[main_index]
-            .as_ref().unwrap()
-            .main_position(loglen)
-            .unwrap_or(main_index);
-        if other_index == main_index {
-            let link = free_index as i32 - main_index as i32;
-            self[free_index] = Some(
-                self[main_index]
-                    .replace(Item::from_insert(item, link))
-                    .unwrap()
-                    .relocate(main_index, free_index)
-            );
-            return;
-        }
-        let mut prev_index = other_index;
-        loop {
-            let link = match self[prev_index]
-                .as_ref().unwrap()
-            {
-                &Item::Dead { link } | &Item::Live { link, .. }
-                    if link != 0 => link,
-                _ => unreachable!(),
-            };
-            let next_index = (prev_index as i32 + link) as u32;
-            if next_index == main_index {
-                break;
-            }
-            prev_index = next_index;
-            // we should have checked that we did not enter a cycle,
-            // but in serialize mode this is not necessary
-        }
-        self[free_index] = Some(
-            self[main_index]
-                .replace(Item::from_insert(item, 0))
-                .unwrap()
-                .relocate(main_index, free_index)
-        );
-        self[prev_index].as_mut().unwrap()
-            .relink(free_index as i32 - other_index as i32);
-    }
-    fn find_free_index(&mut self) -> Option<u32> {
-        while self.last_free > 0 {
-            self.last_free -= 1;
-            if self[self.last_free].is_none() {
-                return Some(self.last_free);
-            }
-        }
-        None
-    }
     pub fn last_free(&self) -> u32 {
         self.last_free
     }
@@ -257,21 +175,6 @@ impl<V> IntoIterator for Table<V> {
     }
 }
 
-impl<V> std::ops::Index<u32> for Table<V> {
-    type Output = Option<Item<V>>;
-    fn index(&self, index: u32) -> &Self::Output {
-        let items = self.items.as_ref().unwrap();
-        &items[index as usize]
-    }
-}
-
-impl<V> std::ops::IndexMut<u32> for Table<V> {
-    fn index_mut(&mut self, index: u32) -> &mut Self::Output {
-        let items = self.items.as_mut().unwrap();
-        &mut items[index as usize]
-    }
-}
-
 pub(super) struct TableIntoIter<V> {
     items: Option<std::vec::IntoIter<Option<Item<V>>>>,
 }
@@ -283,14 +186,16 @@ impl<V> Iterator for TableIntoIter<V> {
     }
 }
 
-pub(super) struct TableLoadBuidler<V> {
+pub(super) struct TableLoadBuilder<V> {
     table: Table<V>,
 }
 
-impl<V> TableLoadBuidler<V> {
+impl<V> TableLoadBuilder<V> {
+
     pub(super) fn new(loglen: Option<u16>) -> Self {
         Self{table: Table::new(loglen)}
     }
+
     pub(super) fn finish<E: load::Error>(self) -> Result<Table<V>, E> {
         #[allow(clippy::assertions_on_constants)]
         { assert!(u32::BITS <= usize::BITS); }
@@ -341,14 +246,142 @@ impl<V> TableLoadBuidler<V> {
         }
         Ok(self.table)
     }
+
     pub(super) fn insert(&mut self, index: u32, item: Item<V>) {
         let items = self.table.items.as_mut().unwrap();
         let index = u32_to_usize(index);
         let old_item = items[index].replace(item);
         assert!(old_item.is_none());
     }
+
     pub(super) fn set_last_free(&mut self, last_free: u32) {
         self.table.last_free = last_free;
     }
+
 }
 
+enum InsertItem<V> {
+    Dead{position: u32},
+    Live{key: Key, value: Option<V>},
+}
+
+impl<V> InsertItem<V> {
+    #[inline]
+    fn dead_from_key(key: KeyRef<'_>, loglen: u16) -> Self {
+        Self::Dead{position: key.position(loglen)}
+    }
+    #[inline]
+    fn position(&self, loglen: u16) -> u32 {
+        match *self {
+            Self::Dead{position} => position & mask(loglen),
+            Self::Live{ref key, ..} => key.position(loglen),
+        }
+    }
+    #[inline]
+    fn into_item(self, link: i32) -> Item<V> {
+        match self {
+            Self::Dead{..} => Item::Dead{link},
+            Self::Live{key, value} => Item::Live{value, key, link},
+        }
+    }
+}
+
+pub(super) struct TableDumpBuilder<V> {
+    table: Table<V>,
+}
+
+impl<V> TableDumpBuilder<V> {
+
+    pub(super) fn new(loglen: Option<u16>) -> Self {
+        Self{table: Table::new(loglen)}
+    }
+
+    pub(super) fn finish(self) -> Table<V> {
+        self.table
+    }
+
+    pub(super) fn insert(&mut self, key: Key, value: Option<V>) {
+        self.insert_item(InsertItem::Live{key, value})
+    }
+
+    pub(super) fn insert_dead(&mut self, key: Key) {
+        self.insert_item(InsertItem::dead_from_key( key.as_ref(),
+            self.table.loglen().unwrap() ))
+    }
+
+    fn insert_item( &mut self,
+        item: InsertItem<V>,
+    ) {
+        let loglen = self.table.loglen()
+            .expect("the table should have free space");
+        let main_index = item.position(loglen);
+        if let free @ &mut None = self.get_mut(main_index) {
+            // Lua here would fill dead position as well as free.
+            // But we are not Lua: we do not normally make dead positions,
+            // and when we do, we don't want to overwrite them.
+            *free = Some(item.into_item(0));
+            return;
+        }
+        let Some(free_index) = self.find_free_index() else {
+            unreachable!("the table should have free space");
+        };
+        let other_index = self.get_mut(main_index)
+            .as_ref().unwrap()
+            .main_position(loglen)
+            .unwrap_or(main_index);
+        if other_index == main_index {
+            let link = free_index as i32 - main_index as i32;
+            *self.get_mut(free_index) = Some(
+                self.get_mut(main_index)
+                    .replace(item.into_item(link))
+                    .unwrap()
+                    .relocate(main_index, free_index)
+            );
+            return;
+        }
+        let mut prev_index = other_index;
+        loop {
+            let link = match self.get_mut(prev_index)
+                .as_ref().unwrap()
+            {
+                &Item::Dead { link } | &Item::Live { link, .. }
+                    if link != 0 => link,
+                _ => unreachable!(),
+            };
+            let next_index = (prev_index as i32 + link) as u32;
+            if next_index == main_index {
+                break;
+            }
+            prev_index = next_index;
+        }
+        *self.get_mut(free_index) = Some(
+            self.get_mut(main_index)
+                .replace(item.into_item(0))
+                .unwrap()
+                .relocate(main_index, free_index)
+        );
+        self.get_mut(prev_index).as_mut().unwrap()
+            .relink(free_index as i32 - other_index as i32);
+    }
+
+    fn get(&self, index: u32) -> &Option<Item<V>> {
+        let items = self.table.items.as_ref().unwrap();
+        &items[index as usize]
+    }
+
+    fn get_mut(&mut self, index: u32) -> &mut Option<Item<V>> {
+        let items = self.table.items.as_mut().unwrap();
+        &mut items[index as usize]
+    }
+
+    fn find_free_index(&mut self) -> Option<u32> {
+        while self.table.last_free > 0 {
+            self.table.last_free -= 1;
+            if self.get(self.table.last_free).is_none() {
+                return Some(self.table.last_free);
+            }
+        }
+        None
+    }
+
+}

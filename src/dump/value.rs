@@ -10,13 +10,13 @@ use super::{
 
 const EXCEEDED_LOGLEN: u16 = crate::MAX_ASSOC_LOGLEN + 1;
 
-pub(crate) fn encode_blueprint<P, B>(exchange: Exchange<P, B>)
+pub(crate) fn encode_blueprint<P, B>(exchange: Exchange<Option<P>, Option<B>>)
 -> Result<Exchange<Vec<u8>, Vec<u8>>, Error>
 where P: Dump, B: Dump
 {
-    fn dump<V: Dump>(value: V) -> Result<Vec<u8>, Error> {
+    fn dump<V: Dump>(value: Option<V>) -> Result<Vec<u8>, Error> {
         let mut dumper = Dumper::new();
-        value.dump(&mut dumper)?;
+        V::dump_option(value.as_ref(), &mut dumper)?;
         Ok(dumper.finish())
     }
     exchange.map(dump, dump).transpose()
@@ -52,7 +52,7 @@ impl Dumper {
     }
 
     #[inline]
-    fn dump_table_header<T: DumpTableIterator>( &mut self,
+    fn dump_table_header<'v, T: DumpTableIterator<'v>>( &mut self,
         table: &T,
     ) -> Result<(), Error> {
         self.output.reserve(4);
@@ -185,12 +185,12 @@ impl DD for &mut Dumper {
         Ok(())
     }
 
-    fn dump_table<K, V, T>( self,
+    fn dump_table<'v, K, V, T>( self,
         mut table: T,
     ) -> Result<Self::Ok, Error>
     where
         K: DumpKey, V: Dump,
-        T: DumpTableIterator<Key=K, Value=V>,
+        T: DumpTableIterator<'v, Key=K, Value=V>,
     {
         let mut array_len = table.array_len();
         let mut assoc_len = iexp2(table.assoc_loglen());
@@ -230,7 +230,7 @@ where
     K: DumpKey, V: Dump,
 {
     dumper: &'v mut Dumper,
-    values: [Option<TableItem<K, V>>; SERIAL_LEN],
+    values: [Option<TableItem<K, &'v V>>; SERIAL_LEN],
     len: u8,
     mask: u8,
 }
@@ -248,7 +248,7 @@ where
         }
     }
     fn push( &mut self,
-        item: Option<TableItem<K, V>>,
+        item: Option<TableItem<K, &'v V>>,
     ) -> Result<(), Error> {
         assert!(self.len < SERIAL_LEN as u8);
         match item {
@@ -277,7 +277,7 @@ where
                 TableItem::Assoc(AssocItem::Dead{link}) =>
                     (None, None, link),
                 TableItem::Assoc(AssocItem::Live{key, value, link}) =>
-                    (Some(key), Some(value), link),
+                    (Some(key), value, link),
             };
             if let Some(value) = value {
                 value.dump(&mut *self.dumper)?;

@@ -39,11 +39,12 @@ pub mod error {
 
 pub trait Dump {
     fn dump<DD: Dumper>(&self, dumper: DD) -> Result<DD::Ok, DD::Error>;
-}
-
-impl<'v, D: Dump> Dump for &'v D {
-    fn dump<DD: Dumper>(&self, dumper: DD) -> Result<DD::Ok, DD::Error> {
-        <D as Dump>::dump(self, dumper)
+    fn dump_option<DD: Dumper>(this: Option<&Self>, dumper: DD)
+    -> Result<DD::Ok, DD::Error> {
+        match this {
+            None => dumper.dump_nil(),
+            Some(value) => value.dump(dumper),
+        }
     }
 }
 
@@ -51,11 +52,11 @@ pub trait DumpKey {
     fn dump_key<DD: KeyDumper>(&self, dumper: DD) -> Result<DD::Ok, DD::Error>;
 }
 
-pub trait DumpTableIterator : TableSize + Iterator<
-    Item=Option<TableItem<Self::Key, Self::Value>> >
+pub trait DumpTableIterator<'v> : TableSize + Iterator<
+    Item=Option<TableItem<Self::Key, &'v Self::Value>> >
 {
     type Key: DumpKey;
-    type Value: Dump;
+    type Value: Dump + 'v;
 }
 
 pub trait KeyDumper : Sized {
@@ -73,16 +74,17 @@ pub trait Dumper : Sized {
     fn dump_integer(self, value: i32) -> Result<Self::Ok, Self::Error>;
     fn dump_float(self, value: f64) -> Result<Self::Ok, Self::Error>;
     fn dump_string(self, value: &str) -> Result<Self::Ok, Self::Error>;
-    fn dump_table<K, V, T>( self,
+    fn dump_table<'v, K, V, T>( self,
         table: T,
     ) -> Result<Self::Ok, Self::Error>
     where
         K: DumpKey, V: Dump,
-        T: DumpTableIterator<Key=K, Value=V>,
+        T: DumpTableIterator<'v, Key=K, Value=V>,
     ;
 }
 
-pub fn dump_blueprint<P, B>(exchange: Exchange<P, B>) -> Result<String, error::Error>
+pub fn dump_blueprint<P, B>(exchange: Exchange<Option<P>, Option<B>>)
+-> Result<String, error::Error>
 where P: Dump, B: Dump
 {
     let encoded_body = value::encode_blueprint(exchange)?;

@@ -4,7 +4,8 @@
 
 use std::borrow::Borrow;
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(clippy::exhaustive_enums)]
 pub enum Key<I: Borrow<i32>, S: Borrow<str>> {
     Index(I),
     Name(S),
@@ -21,6 +22,7 @@ where I: Borrow<i32>, S: Borrow<str>,
     }
 }
 
+pub type KeyOwned = Key<i32, String>;
 pub type KeyRef<'s> = Key<i32, &'s str>;
 
 impl<I, S> Key<I, S>
@@ -31,6 +33,12 @@ where I: Borrow<i32>, S: Borrow<str>,
         match *self {
             Self::Index(ref index) => KeyRef::Index(*index.borrow()),
             Self::Name(ref name) => KeyRef::Name(name.borrow()),
+        }
+    }
+    pub fn to_owned(&self) -> KeyOwned {
+        match *self {
+            Self::Index(ref index) => Key::Index(*index.borrow()),
+            Self::Name(ref name) => Key::Name(String::from(name.borrow())),
         }
     }
 }
@@ -47,7 +55,14 @@ where I: Borrow<i32>, S: Borrow<str>,
     }
 }
 
+impl From<&str> for KeyOwned {
+    fn from(value: &str) -> Self {
+        Self::Name(String::from(value))
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
+#[allow(clippy::exhaustive_enums)]
 pub enum TableItem<K, V> {
     Array(V),
     Assoc(AssocItem<K, V>),
@@ -75,9 +90,10 @@ impl<K, V> TableItem<K, V> {
 }
 
 #[derive(Clone, Copy)]
+#[allow(clippy::exhaustive_enums)]
 pub enum AssocItem<K, V> {
     Dead{link: i32},
-    Live{value: V, key: K, link: i32},
+    Live{value: Option<V>, key: K, link: i32},
 }
 
 impl<K, V> AssocItem<K, V> {
@@ -86,7 +102,7 @@ impl<K, V> AssocItem<K, V> {
         match *self {
             Self::Dead{link} => AssocItem::Dead{link},
             Self::Live{ref value, ref key, link} =>
-                AssocItem::Live{value, key, link},
+                AssocItem::Live{value: value.as_ref(), key, link},
         }
     }
     #[inline]
@@ -97,7 +113,7 @@ impl<K, V> AssocItem<K, V> {
         match self {
             Self::Dead{link} => AssocItem::Dead{link},
             Self::Live{value, key, link} =>
-                AssocItem::Live{value: valuef(value), key: keyf(key), link},
+                AssocItem::Live{value: value.map(valuef), key: keyf(key), link},
         }
     }
 }
@@ -108,7 +124,7 @@ where K: std::fmt::Debug, V: std::fmt::Debug,
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let link = match self {
             Self::Dead{link} => {
-                f.write_str("🕱")?;
+                f.write_str("×")?;
                 *link
             },
             Self::Live{value, key, link} => {
@@ -132,6 +148,7 @@ pub trait TableSize {
     fn assoc_last_free(&self) -> u32;
 }
 
+#[must_use]
 pub const fn u32_to_usize(len: u32) -> usize {
     assert!({ const OK: bool = {
         let ok = u32::BITS <= usize::BITS;
@@ -140,6 +157,7 @@ pub const fn u32_to_usize(len: u32) -> usize {
     len as usize
 }
 
+#[must_use]
 #[inline]
 pub const fn ilog2_ceil(len: usize) -> Option<u16> {
     //! Upper-rounded base 2 logarithm
@@ -152,6 +170,7 @@ pub const fn ilog2_ceil(len: usize) -> Option<u16> {
     Some(ilog2 as u16)
 }
 
+#[must_use]
 #[inline]
 pub const fn ilog2_exact(len: usize) -> Option<u16> {
     //! Base 2 logarithm. Returns `None` if `len` is not a power of two.
@@ -164,6 +183,7 @@ pub const fn ilog2_exact(len: usize) -> Option<u16> {
     Some(ilog2 as u16)
 }
 
+#[must_use]
 #[inline]
 pub const fn iexp2(loglen: Option<u16>) -> u32 {
     let Some(loglen) = loglen else { return 0 };

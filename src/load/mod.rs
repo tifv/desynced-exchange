@@ -60,8 +60,8 @@ pub trait LoadKey : Sized {
 }
 
 pub trait Load : Sized {
-    fn load<L: Loader>(loader: L) -> Result<Self, L::Error>;
-    fn is_nil(&self) -> bool;
+    fn load<L: Loader>(loader: L) -> Result<Option<Self>, L::Error>;
+    // fn is_nil(&self) -> bool;
 }
 
 pub trait LoadTableIterator : TableSize + Iterator<
@@ -73,20 +73,23 @@ pub trait LoadTableIterator : TableSize + Iterator<
 }
 
 pub trait KeyBuilder : Sized {
-    type Value: LoadKey;
-    fn build_integer<E: Error>(self, value: i32) -> Result<Self::Value, E>;
-    fn build_string<E: Error>(self, value: &str) -> Result<Self::Value, E>;
+    type Output;
+    fn build_integer<E: Error>(self, value: i32) -> Result<Self::Output, E>;
+    fn build_string<E: Error>(self, value: &str) -> Result<Self::Output, E>;
 }
 
 pub trait Builder : Sized {
+    type Output;
     type Key: LoadKey;
     type Value: Load;
-    fn build_nil<E: Error>(self) -> Result<Self::Value, E>;
-    fn build_boolean<E: Error>(self, value: bool) -> Result<Self::Value, E>;
-    fn build_integer<E: Error>(self, value: i32) -> Result<Self::Value, E>;
-    fn build_float<E: Error>(self, value: f64) -> Result<Self::Value, E>;
-    fn build_string<E: Error>(self, value: &str) -> Result<Self::Value, E>;
-    fn build_table<T, E: Error>(self, items: T) -> Result<Self::Value, E>
+    fn build_nil<E: Error>(self) -> Result<Option<Self::Output>, E> {
+        Ok(None)
+    }
+    fn build_boolean<E: Error>(self, value: bool) -> Result<Option<Self::Output>, E>;
+    fn build_integer<E: Error>(self, value: i32) -> Result<Option<Self::Output>, E>;
+    fn build_float<E: Error>(self, value: f64) -> Result<Option<Self::Output>, E>;
+    fn build_string<E: Error>(self, value: &str) -> Result<Option<Self::Output>, E>;
+    fn build_table<T, E: Error>(self, items: T) -> Result<Option<Self::Output>, E>
     where T: LoadTableIterator<Key=Self::Key, Value=Self::Value, Error=E>;
 }
 
@@ -94,14 +97,14 @@ pub trait Loader {
     type Error: Error;
     fn load_value<B: Builder>( self,
         builder: B,
-    ) -> Result<B::Value, Self::Error>;
+    ) -> Result<Option<B::Output>, Self::Error>;
     fn load_key<B: KeyBuilder>( self,
         builder: B,
-    ) -> Result<Option<B::Value>, Self::Error>;
+    ) -> Result<Option<B::Output>, Self::Error>;
 }
 
 pub fn load_blueprint<P, B>(exchange: &str)
--> Result<Exchange<P, B>, error::Error>
+-> Result<Exchange<Option<P>, Option<B>>, error::Error>
 where P: Load, B: Load,
 {
     value::decode_blueprint(decompress::decompress(exchange)?)

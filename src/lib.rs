@@ -290,8 +290,6 @@
 #![allow(clippy::diverging_sub_expression)]
 #![allow(clippy::needless_pass_by_value)]
 
-// also check all XXX
-
 // LINTS: production
 // #![warn(clippy::todo)]
 // #![warn(clippy::unimplemented)]
@@ -299,17 +297,16 @@
 // #![warn(clippy::exhaustive_enums)]
 // #![warn(clippy::exhaustive_structs)]
 
-// pub mod iterpower;
-
 mod ascii;
 mod intlim;
 
-mod table;
+pub mod table;
+pub mod load;
+pub mod dump;
 
-mod load;
-mod dump;
+pub mod value;
 
-mod value;
+pub mod behavior;
 
 mod test;
 

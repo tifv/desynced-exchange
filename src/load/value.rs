@@ -11,7 +11,7 @@ use super::{
 };
 
 pub(crate) fn decode_blueprint<P, B>(encoded_data: Exchange<Vec<u8>,Vec<u8>>)
--> Result<Exchange<P, B>, Error>
+-> Result<Exchange<Option<P>, Option<B>>, Error>
 where P: Load, B: Load,
 {
     Ok(match encoded_data {
@@ -183,7 +183,7 @@ impl<'data> LL for &mut Loader<'data> {
 
     fn load_value<B: super::Builder>( self,
         builder: B,
-    ) -> Result<B::Value, Error> {
+    ) -> Result<Option<B::Output>, Error> {
         let head = self.read_byte()?;
         match head {
             0xC0 => {
@@ -229,7 +229,7 @@ impl<'data> LL for &mut Loader<'data> {
 
     fn load_key<B: super::KeyBuilder>( self,
         builder: B,
-    ) -> Result<Option<B::Value>, Error> {
+    ) -> Result<Option<B::Output>, Error> {
         let head = self.read_byte()?;
         match head {
             0xC5 => Ok(None),
@@ -290,7 +290,7 @@ where K: LoadKey, V: Load,
             return Ok(None);
         }
         let value = V::load(&mut *self.loader)?;
-        Ok(Some(TableItem::Array(value)))
+        Ok(value.map(TableItem::Array))
     }
     fn read_assoc_item(&mut self) -> Result<Option<TableItem<K, V>>, Error> {
         if self.next_is_masked()? {
@@ -307,9 +307,9 @@ where K: LoadKey, V: Load,
             link = -link;
         }
         if let Some(key) = key {
-            Ok(Some(TableItem::Assoc(AssocItem::Live{ value, key, link })))
+            Ok(Some(TableItem::Assoc(AssocItem::Live{value, key, link})))
         } else {
-            if !value.is_nil() {
+            if value.is_some() {
                 return Err(Error::from(
                     "empty key should correspond to nil value" ))
             }

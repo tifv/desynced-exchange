@@ -8,7 +8,7 @@ use thiserror::Error;
 #[error("Integer base conversion error")]
 pub(crate) struct IntLimError;
 
-use crate::ascii::{self, Ascii};
+use crate::ascii::Ascii;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 // Invariant: the value in the struct cannot be `>= L`
@@ -177,7 +177,7 @@ impl Int62 {
 #[cfg(test)]
 mod test {
     use crate::{ascii::{Ascii, AsciiStr}, intlim::IntLimError};
-    use super::{IntLim, Int31, Int62, encode_base62, decode_base62};
+    use super::{IntLim, Int62, encode_base62, decode_base62};
 
     #[test]
     fn test_divrem() {
