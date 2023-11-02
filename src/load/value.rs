@@ -28,6 +28,7 @@ where P: Load, B: Load,
 
 pub(super) struct Loader<'data> {
     reader: Reader<'data>,
+    max_array_len: u32,
 }
 
 #[cold]
@@ -59,7 +60,15 @@ impl TableHeader {
 impl<'data> Loader<'data> {
 
     pub(super) fn new(reader: Reader<'data>) -> Self {
-        Self{reader}
+        // The most compact representation of an array element
+        // is bitmask, which is eight (nil) elements per one byte.
+        let max_array_len = u32::try_from(reader.len())
+            .unwrap_or(u32::MAX)
+            .saturating_mul(8);
+        Self{
+            reader,
+            max_array_len,
+        }
     }
 
     fn read_byte(&mut self) -> Result<u8, Error> {
@@ -210,13 +219,13 @@ impl<'data> LL for &mut Loader<'data> {
                     return Err(Error::from(
                         "Encoded table size is too large" ));
                 }
-                let max_array_len = u32::try_from(self.reader.len())
-                    .unwrap_or(u32::MAX)
-                    .saturating_mul(8);
-                if array_len > max_array_len {
-                    return Err(Error::from(
-                        "Encoded table size is too large to be correct" ));
-                }
+                self.max_array_len = match
+                    self.max_array_len.checked_sub(array_len)
+                {
+                    None => return Err(Error::from(
+                        "Encoded table size is too large to be correct" )),
+                    Some(rest) => rest,
+                };
                 builder.build_table(SerialReader::new(
                     self,
                     array_len,

@@ -1,6 +1,6 @@
 mod table;
 
-pub use table::{Key, Table};
+pub use table::{Key, TableIntoError};
 
 use crate::{
     dump,
@@ -10,13 +10,16 @@ use crate::{
 
 use self::table::TableLoadBuilder;
 
+#[derive(Clone)]
 pub enum Value {
     Boolean(bool),
     Integer(i32),
     Float(f64),
     String(String),
-    Table(Table<Value>)
+    Table(Table)
 }
+
+pub type Table = table::Table<Value>;
 
 impl std::fmt::Debug for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -153,6 +156,13 @@ impl load::Builder for ValueBuilder {
         Ok(Some(Value::Table(table.finish::<E>()?)))
     }
 
+}
+
+impl FromIterator<Option<Value>> for Value {
+    #![allow(clippy::use_self)]
+    fn from_iter<T: IntoIterator<Item=Option<Value>>>(iter: T) -> Self {
+        Self::Table(Table::from_iter(iter))
+    }
 }
 
 #[cfg(test)]

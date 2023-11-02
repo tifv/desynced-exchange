@@ -35,6 +35,13 @@ where I: Borrow<i32>, S: Borrow<str>,
             Self::Name(ref name) => KeyRef::Name(name.borrow()),
         }
     }
+    #[inline]
+    pub fn as_index(&self) -> Option<i32> {
+        match *self {
+            Self::Index(ref index) => Some(*index.borrow()),
+            Self::Name(_) => None,
+        }
+    }
     pub fn to_owned(&self) -> KeyOwned {
         match *self {
             Self::Index(ref index) => Key::Index(*index.borrow()),

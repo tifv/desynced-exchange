@@ -6,7 +6,7 @@ use crate::{
     table::{
         KeyRef,
         TableItem,
-        u32_to_usize,
+        iexp2, u32_to_usize,
     },
     dump::Dump,
     load,
@@ -72,20 +72,36 @@ impl<V> Table<V> {
             assoc: self.assoc.dump_iter(),
         }
     }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        //! May be greater than the actual number of non-nil entries
+        usize::checked_add(
+            self.array_len(),
+            u32_to_usize(iexp2(self.assoc_loglen())),
+        ).unwrap()
+    }
+
+    #[must_use]
+    pub fn array_len(&self) -> usize {
+        self.array.len()
+    }
+
+    #[must_use]
+    pub fn assoc_loglen(&self) -> Option<u16> {
+        self.assoc.loglen()
+    }
+
 }
 
-/*
-impl<V> IntoIterator for Table<V> {
-    type Item = (Key, V);
-    type IntoIter = TableIntoIter<V>;
-    fn into_iter(self) -> Self::IntoIter {
-        TableIntoIter{
-            array_iter: Some(self.array.into_iter().enumerate()),
-            assoc_iter: Some(self.assoc.into_iter()),
+impl<V> FromIterator<Option<V>> for Table<V> {
+    fn from_iter<T: IntoIterator<Item=Option<V>>>(iter: T) -> Self {
+        Self{
+            array: Vec::from_iter(iter),
+            assoc: AssocTable::new(None),
         }
     }
 }
-*/
 
 pub struct TableDumpIter<'s, V> {
     array: Option<std::slice::Iter<'s, Option<V>>>,
@@ -128,10 +144,20 @@ impl<'s, V: Dump> crate::dump::DumpTableIterator<'s> for TableDumpIter<'s, V> {
     type Value = V;
 }
 
-/*
+impl<V> IntoIterator for Table<V> {
+    type Item = (Key, V);
+    type IntoIter = TableIntoIter<V>;
+    fn into_iter(self) -> Self::IntoIter {
+        TableIntoIter{
+            array_iter: Some(self.array.into_iter().enumerate()),
+            assoc_iter: Some(self.assoc.into_iter()),
+        }
+    }
+}
 
 pub struct TableIntoIter<V> {
-    array_iter: Option<Enumerate<std::vec::IntoIter<Option<V>>>>,
+    array_iter: Option<std::iter::Enumerate<
+        std::vec::IntoIter<Option<V>> >>,
     assoc_iter: Option<assoc::TableIntoIter<V>>,
 }
 
@@ -151,15 +177,163 @@ impl<V> Iterator for TableIntoIter<V> {
         while let Some(item) =
             self.assoc_iter.as_mut().and_then(Iterator::next)
         {
-            let Some(AssocItem::Live{value, key, ..}) = item
+            let Some(AssocItem::Live{value: Some(value), key, ..}) = item
                 else { continue };
-            return Some((key.clone(), value));
+            return Some((key, value));
         }
         None
     }
 }
 
-*/
+pub enum TableIntoError {
+    NonContinuous(i32),
+    UnexpectedKey(Key),
+}
+
+pub trait MaybeSequence<V> : Sized {
+    fn new(table_len: u32) -> Self;
+    fn insert(&mut self, index: i32, value: V) -> Result<(), TableIntoError>;
+}
+
+pub struct MaybeVec<V> {
+    max_index: u32,
+    vec: Vec<Option<V>>,
+}
+
+impl<V> MaybeSequence<V> for MaybeVec<V> {
+
+    fn new(table_len: u32) -> Self {
+        Self{max_index: table_len, vec: Vec::new()}
+    }
+
+    fn insert(&mut self, index: i32, value: V) -> Result<(), TableIntoError> {
+        if index < 1 {
+            return Err(TableIntoError::NonContinuous(index));
+        };
+        let index = index as u32;
+        if index > self.max_index {
+            return Err(TableIntoError::NonContinuous(index as i32));
+        };
+        let index = u32_to_usize(index);
+        if self.vec.len() < index {
+            self.vec.resize_with(index, || None);
+        }
+        self.vec[index-1] = Some(value);
+        Ok(())
+    }
+
+}
+
+impl<const N: usize, V> MaybeSequence<V> for Box<[Option<V>; N]> {
+    fn new(_table_len: u32) -> Self {
+        #[allow(clippy::use_self)]
+        Box::new([(); N].map(|()| None))
+    }
+
+    fn insert(&mut self, index: i32, value: V) -> Result<(), TableIntoError> {
+        if index < 1 {
+            return Err(TableIntoError::NonContinuous(index));
+        };
+        let index = u32_to_usize(index as u32);
+        if index > N {
+            return Err(TableIntoError::UnexpectedKey(Key::Index(index as i32)));
+        };
+        self[index-1] = Some(value);
+        Ok(())
+    }
+}
+
+pub trait Sequence<V>: Sized {
+    type Builder: MaybeSequence<V>;
+    fn finish(precursor: Self::Builder) -> Result<Self, TableIntoError>;
+}
+
+impl<V> Sequence<V> for Vec<V> {
+    type Builder = MaybeVec<V>;
+
+    fn finish(maybe_vec: MaybeVec<V>) -> Result<Self, TableIntoError> {
+        let maybe_vec = maybe_vec.vec;
+        let mut vec = Self::with_capacity(maybe_vec.len());
+        let mut maybe_vec = maybe_vec.into_iter();
+        while let Some(value) = maybe_vec.next() {
+            if let Some(value) = value {
+                vec.push(value);
+                continue;
+            }
+            let missing = vec.len() + 1;
+            let Some(next_index) = maybe_vec.enumerate()
+                .find_map(|(i, x)| x.map(|_| missing + i))
+                .map(i32::try_from).and_then(Result::ok)
+                else { unreachable!() };
+            return Err(TableIntoError::NonContinuous(next_index));
+        }
+        Ok(vec)
+    }
+}
+
+impl<const N: usize, V> Sequence<V> for Box<[Option<V>; N]> {
+    type Builder = Self;
+    fn finish(this: Self) -> Result<Self, TableIntoError> {
+        Ok(this)
+    }
+}
+
+impl<V> Table<V> {
+    /// Sort indices in integers and strings.
+    /// String indices are forwarded to `consume_name` function;
+    /// any error is immediately forwarded back to the caller.
+    /// Integer indices are collected into a sequence, which may
+    /// additionally check them (e.g. return errors for negatives);
+    /// the resulting sequence is returned to the caller.
+    pub fn try_into_seq_and_named<S, F, E, EF>( self,
+        mut consume_name: F,
+        mut err_map: EF,
+    ) -> Result<S, E>
+    where
+        S: Sequence<V>,
+        F: FnMut(String, V) -> Result<(), E>,
+        EF: FnMut(TableIntoError) -> E,
+    {
+        let Ok(table_len) = u32::try_from(self.len()) else {
+            unreachable!()
+        };
+        let mut maybe_cont = S::Builder::new(table_len);
+        for (key, value) in self {
+            match key {
+                Key::Index(index) => {
+                    maybe_cont.insert(index, value).map_err(&mut err_map)?;
+                    continue
+                },
+                Key::Name(name) => consume_name(name, value)?,
+            }
+        }
+        let cont = S::finish(maybe_cont).map_err(&mut err_map)?;
+        Ok(cont)
+    }
+    pub fn try_into_named<F, E, EF>( self,
+        consume_name: F,
+        err_map: EF,
+    ) -> Result<(), E>
+    where
+        F: FnMut(String, V) -> Result<(), E>,
+        EF: FnMut(TableIntoError) -> E,
+    {
+        let _: Box<[_;0]> =
+            self.try_into_seq_and_named(consume_name, err_map)?;
+        Ok(())
+    }
+}
+
+impl<V> TryFrom<Table<V>> for Vec<V> {
+    type Error = TableIntoError;
+    #[allow(clippy::use_self)]
+    fn try_from(this: Table<V>) -> Result<Vec<V>, Self::Error> {
+        this.try_into_seq_and_named(
+            |name, _value| Err(TableIntoError::UnexpectedKey(Key::Name(name))),
+            std::convert::identity,
+        )
+    }
+}
 
 pub(super) struct TableLoadBuilder<V> {
     array: Vec<Option<V>>,
@@ -193,6 +367,7 @@ impl<V> TableLoadBuilder<V> {
 
     pub(super) fn assoc_insert(&mut self, index: u32, item: AssocItem<V>) {
         //! `index` is 0-based
+        todo!("validate that the item is not shadowed by an array index");
         self.assoc.insert(index, item);
     }
 
@@ -219,6 +394,10 @@ impl<V> TableBuilder<V> {
 
     #[must_use]
     pub fn finish(self) -> Table<V> {
+        todo!()
+    }
+
+    pub fn expect_array_len(&mut self, len: usize) {
         todo!()
     }
 
