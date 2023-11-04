@@ -1,5 +1,5 @@
 [package]
-name = "serde-desynced"
+name = "exchange-desynced"
 version = "0.1.0"
 edition = "2021"
 
