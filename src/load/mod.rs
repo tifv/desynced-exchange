@@ -1,13 +1,9 @@
 //! A specialized imitation of `serde::ser`.
 
-use std::io::Read;
-
 use crate::{
     Exchange,
     table::{TableItem, TableSize},
 };
-
-use self::reader::Reader;
 
 mod reader;
 pub(crate) mod value;

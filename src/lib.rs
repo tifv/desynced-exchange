@@ -186,7 +186,6 @@
 #![warn(clippy::must_use_candidate)]
 #![warn(clippy::mut_mut)]
 #![warn(clippy::needless_for_each)]
-#![warn(clippy::needless_pass_by_value)]
 #![warn(clippy::option_option)]
 #![warn(clippy::or_fun_call)]
 #![warn(clippy::partial_pub_fields)]
@@ -279,21 +278,21 @@
 #![warn(clippy::zero_sized_map_values)]
 
 // LINTS: development temporary
-#![allow(dead_code)]
-#![allow(unreachable_code)]
-#![allow(unreachable_patterns)]
-#![allow(unused_imports)]
-#![allow(unused_variables)]
-#![allow(unused_mut)]
-#![allow(unused_assignments)]
-#![allow(irrefutable_let_patterns)]
-#![allow(clippy::diverging_sub_expression)]
-#![allow(clippy::needless_pass_by_value)]
+// #![allow(dead_code)]
+// #![allow(unreachable_code)]
+// #![allow(unreachable_patterns)]
+// #![allow(unused_imports)]
+// #![allow(unused_variables)]
+// #![allow(unused_mut)]
+// #![allow(unused_assignments)]
+// #![allow(irrefutable_let_patterns)]
+// #![allow(clippy::diverging_sub_expression)]
+// #![allow(clippy::needless_pass_by_value)]
 
 // LINTS: production
-// #![warn(clippy::todo)]
-// #![warn(clippy::unimplemented)]
-// #![warn(clippy::dbg_macro)]
+#![warn(clippy::todo)]
+#![warn(clippy::unimplemented)]
+#![warn(clippy::dbg_macro)]
 // #![warn(clippy::exhaustive_enums)]
 // #![warn(clippy::exhaustive_structs)]
 
@@ -307,6 +306,7 @@ pub mod dump;
 pub mod value;
 
 pub mod behavior;
+pub mod blueprint;
 
 mod test;
 

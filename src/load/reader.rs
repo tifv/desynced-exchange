@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 #![allow(unsafe_op_in_unsafe_fn)]
 #![allow(clippy::undocumented_unsafe_blocks)]
 #![allow(clippy::multiple_unsafe_ops_per_block)]
@@ -5,7 +6,7 @@
 use std::marker::PhantomData;
 use std::hint::unreachable_unchecked;
 
-use crate::ascii::{self, Ascii, AsciiArray, AsciiStr, AsciiString};
+use crate::ascii::{Ascii, AsciiArray, AsciiStr};
 
 pub(super) struct Reader<'data> {
     cursor: *const u8,
@@ -24,11 +25,13 @@ unsafe fn ptr_sub<T>(more: *const T, less: *const T) -> usize {
 
 impl<'data> Reader<'data> {
 
+    #[inline]
     pub(super) fn from_slice(slice: &'data [u8]) -> Self {
         let std::ops::Range{start, end} = slice.as_ptr_range();
         Self{cursor: start, end, lifetime: PhantomData}
     }
 
+    #[inline]
     pub(super) fn into_slice(self) -> &'data [u8] {
         unsafe {
             let Self{cursor: start, end, ..} = self;
@@ -105,60 +108,69 @@ impl<'data> Reader<'data> {
 
 }
 
-pub(super) struct AsciiReader<'data> {
+pub struct AsciiReader<'data> {
     reader: Reader<'data>,
 }
 
 impl<'data> AsciiReader<'data> {
 
-    pub(super) fn from_slice(slice: &'data [Ascii]) -> Self {
+    #[inline]
+    pub fn from_slice(slice: &'data [Ascii]) -> Self {
         Self{reader: Reader::from_slice(
             <&AsciiStr>::from(slice).into() )}
     }
 
-    pub(super) fn into_slice(self) -> &'data [Ascii] {
+    #[inline]
+    pub fn into_slice(self) -> &'data [Ascii] {
         let slice = self.reader.into_slice();
         unsafe {
             AsciiStr::from_bytes_unchecked(slice)
         }
     }
 
+    #[inline]
     pub fn len(&self) -> usize {
         self.reader.len()
     }
 
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.reader.is_empty()
     }
 
-    pub(super) fn read_char(&mut self) -> Option<Ascii> {
+    #[inline]
+    pub fn read_char(&mut self) -> Option<Ascii> {
         self.read_array().map(|[x]| x)
     }
 
     #[inline]
-    pub(super) fn read_end_char(&mut self) -> Option<Ascii> {
+    pub fn read_end_char(&mut self) -> Option<Ascii> {
         self.read_end_array().map(|[x]| x)
     }
 
-    pub(super) fn read_array<const N: usize>(&mut self) -> Option<[Ascii; N]> {
+    #[inline]
+    pub fn read_array<const N: usize>(&mut self) -> Option<[Ascii; N]> {
         Some(unsafe { *AsciiArray::from_bytes_unchecked(
             self.reader.read_array()?
         ) })
     }
 
-    pub(super) fn read_end_array<const N: usize>(&mut self) -> Option<[Ascii; N]> {
+    #[inline]
+    pub fn read_end_array<const N: usize>(&mut self) -> Option<[Ascii; N]> {
         Some(unsafe { *AsciiArray::from_bytes_unchecked(
             self.reader.read_end_array()?
         ) })
     }
 
-    pub(super) fn read_slice(&mut self, len: usize) -> Option<&'data [Ascii]> {
+    #[inline]
+    pub fn read_slice(&mut self, len: usize) -> Option<&'data [Ascii]> {
         Some(unsafe { AsciiStr::from_bytes_unchecked(
             self.reader.read_slice(len)?
         ) })
     }
 
-    pub(super) fn read_rest(&mut self) -> &'data [Ascii] {
+    #[inline]
+    pub fn read_rest(&mut self) -> &'data [Ascii] {
         unsafe { AsciiStr::from_bytes_unchecked(
             self.reader.read_rest()
         ) }

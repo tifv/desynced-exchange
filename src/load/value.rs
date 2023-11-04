@@ -1,4 +1,4 @@
-use std::{io::Read, marker::PhantomData};
+use std::marker::PhantomData;
 
 use crate::{
     Exchange,
@@ -153,7 +153,7 @@ impl<'data> Loader<'data> {
                 let mut array_len = 0_u32;
                 if head & 0x01 > 0 {
                     let mut k = 1_u32;
-                    for i in [0, 1] {
+                    for () in [(); 2] {
                         let b = self.read_byte()?;
                         array_len += ((b >> 1) as u32) * k;
                         if b & 0x01 > 0 {

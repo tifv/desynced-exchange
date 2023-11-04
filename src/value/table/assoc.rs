@@ -238,7 +238,7 @@ impl<V> TableLoadBuilder<V> {
             }
         }
         for position in 0 .. len {
-            let mut index = u32_to_usize(position);
+            let index = u32_to_usize(position);
             if unvalidated[index].is_some() {
                 return Err(E::from(
                     "table key should be in a valid position" ));

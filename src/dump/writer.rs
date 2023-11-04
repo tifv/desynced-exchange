@@ -1,10 +1,11 @@
+#![allow(dead_code)]
 #![allow(unsafe_op_in_unsafe_fn)]
 #![allow(clippy::undocumented_unsafe_blocks)]
 #![allow(clippy::multiple_unsafe_ops_per_block)]
 
 use std::hint::unreachable_unchecked;
 
-use crate::ascii::{self, Ascii, AsciiArray, AsciiStr, AsciiString};
+use crate::ascii::{Ascii, AsciiArray, AsciiStr, AsciiString};
 
 pub(super) struct Writer {
     start: *mut u8,

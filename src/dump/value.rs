@@ -186,7 +186,7 @@ impl DD for &mut Dumper {
     }
 
     fn dump_table<'v, K, V, T>( self,
-        mut table: T,
+        table: T,
     ) -> Result<Self::Ok, Error>
     where
         K: DumpKey, V: Dump,

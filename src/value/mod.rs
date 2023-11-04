@@ -136,7 +136,7 @@ impl load::Builder for ValueBuilder {
                 (Some(TableItem::Array(value)), true, _) => {
                     let index = array_index;
                     array_index += 1;
-                    table.array_insert(index, value);
+                    table.array_insert::<E>(index, value)?;
                 },
                 (None, true, _) => array_index += 1,
                 (Some(TableItem::Array(_)), false, _) =>
@@ -144,7 +144,7 @@ impl load::Builder for ValueBuilder {
                 (Some(TableItem::Assoc(assoc_item)), false, true) => {
                     let index = assoc_index;
                     assoc_index += 1;
-                    table.assoc_insert(index, assoc_item);
+                    table.assoc_insert::<E>(index, assoc_item)?;
                 },
                 (None, false, true) => assoc_index += 1,
                 (Some(TableItem::Assoc(_)), true, _) =>

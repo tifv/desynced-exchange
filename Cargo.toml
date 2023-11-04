@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 thiserror = "=1.*"
 flate2 = "=1.*"
+serde = { version = "=1.*", features = ["derive"]}

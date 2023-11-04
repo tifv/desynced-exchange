@@ -2,14 +2,11 @@ use flate2::write::ZlibEncoder as ZippingWriter;
 
 use crate::{
     Exchange,
-    ascii::{self, Ascii, AsciiArray},
+    ascii::{self, Ascii},
     intlim::{Int62, Int31, encode_base62},
 };
 
-use super::{
-    error::Error,
-    writer::{Writer, AsciiWriter},
-};
+use super::writer::AsciiWriter;
 
 pub(crate) fn compress<'b>(
     body: Exchange<&'b [u8], &'b [u8]>,
@@ -99,7 +96,7 @@ impl<'w> Base62Encoder<'w> {
         if self.buffer_len > 0 {
             self.consume_final_word();
         }
-        let Self{writer, checksum, buffer_len: 0, ..} = self else {
+        let Self{checksum, buffer_len: 0, ..} = self else {
             unreachable!()
         };
         encode_base62(Int62::divrem(checksum.0).1)
@@ -149,7 +146,7 @@ impl<'w> Base62Encoder<'w> {
         u32::from_le_bytes(word_bytes)
     }
     #[inline]
-    fn encode_word(mut word: u32) -> (usize, [Ascii; ENCODED_WORD_LEN]) {
+    fn encode_word(word: u32) -> (usize, [Ascii; ENCODED_WORD_LEN]) {
         let (start, decomposed) =
             Int62::be_decompose::<ENCODED_WORD_LEN>(word);
         let mut result = [ascii::char!('0'); ENCODED_WORD_LEN];

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 mod assoc;
 
@@ -6,7 +6,7 @@ use crate::{
     table::{
         KeyRef,
         TableItem,
-        iexp2, u32_to_usize,
+        iexp2, u32_to_usize, ilog2_ceil,
     },
     dump::Dump,
     load,
@@ -55,13 +55,14 @@ where V: std::fmt::Debug,
 impl<V> Table<V> {
 
     #[must_use]
-    pub fn builder() -> TableBuilder<V> {
-        TableBuilder::new()
+    pub fn map_builder() -> TableMapBuilder<V> {
+        TableMapBuilder::new()
     }
 
     #[must_use]
-    pub fn assoc_builder(loglen: Option<u16>) -> AssocTableBuilder<V> {
-        AssocTableBuilder::new(loglen)
+    pub fn dump_builder(array_len: Option<u32>, assoc_loglen: Option<u16>)
+    -> TableDumpBuilder<V> {
+        TableDumpBuilder::new(array_len, assoc_loglen)
     }
 
     #[must_use]
@@ -94,6 +95,116 @@ impl<V> Table<V> {
 
 }
 
+pub(super) struct TableLoadBuilder<V> {
+    array: Vec<Option<V>>,
+    assoc: AssocTableLoadBuilder<V>,
+}
+
+impl<V> TableLoadBuilder<V> {
+
+    #[must_use]
+    pub(super) fn new(array_len: u32, assoc_loglen: Option<u16>) -> Self {
+        let mut array = Vec::with_capacity(u32_to_usize(array_len));
+        array.resize_with(u32_to_usize(array_len), || None);
+        Self {
+            array,
+            assoc: AssocTableLoadBuilder::new(assoc_loglen),
+        }
+    }
+
+    pub(super) fn finish<E: load::Error>(self) -> Result<Table<V>, E> {
+        let Self{array, assoc} = self;
+        let assoc = assoc.finish::<E>()?;
+        Ok(Table{array, assoc})
+    }
+
+    pub(super) fn array_insert<E: load::Error>( &mut self,
+        index: u32, value: V,
+    ) -> Result<(), E> {
+        //! `index` is 0-based
+        #![allow(clippy::unnecessary_wraps)]
+        let index = u32_to_usize(index);
+        let old_value = self.array[index].replace(value);
+        assert!(old_value.is_none());
+        Ok(())
+    }
+
+    pub(super) fn assoc_insert<E: load::Error>( &mut self,
+        index: u32, item: AssocItem<V>,
+    ) -> Result<(), E> {
+        //! `index` is 0-based
+        match &item {
+            &AssocItem::Live{key: Key::Index(key), ..}
+                if key > 0 && (key as u32) <= (self.array.len() as u32)
+            => return Err(E::from(
+                "this assoc item should belong to array part" )),
+            _ => ()
+        }
+        self.assoc.insert(index, item);
+        Ok(())
+    }
+
+    pub(super) fn set_last_free(&mut self, last_free: u32) {
+        self.assoc.set_last_free(last_free)
+    }
+
+}
+
+pub struct TableDumpBuilder<V> {
+    array: Vec<Option<V>>,
+    assoc: AssocTableDumpBuilder<V>,
+}
+
+impl<V> TableDumpBuilder<V> {
+
+    #[must_use]
+    fn new(
+        array_len: Option<u32>,
+        assoc_loglen: Option<u16>,
+    ) -> Self {
+        Self{
+            array: match array_len {
+                Some(len) => Vec::with_capacity(u32_to_usize(len)),
+                None => Vec::new(),
+            },
+            assoc: AssocTableDumpBuilder::new(assoc_loglen),
+        }
+    }
+
+    #[must_use]
+    pub fn finish(self) -> Table<V> {
+        let Self{array, assoc} = self;
+        Table { array, assoc: assoc.finish() }
+    }
+
+    pub fn array_push(&mut self, value: Option<V>) {
+        self.array.push(value);
+    }
+
+    pub fn assoc_insert(&mut self, key: Key, value: Option<V>) {
+        self.assoc.insert(key, value)
+    }
+
+    pub fn assoc_insert_name(&mut self, key: &'static str, value: Option<V>) {
+        self.assoc_insert(Key::from(key), value)
+    }
+
+    pub fn assoc_insert_dead(&mut self, key: Key) {
+        self.assoc.insert_dead(key)
+    }
+
+    pub fn assoc_insert_dead_name(&mut self, key: &'static str) {
+        self.assoc_insert_dead(Key::from(key))
+    }
+
+}
+
+impl<V> Extend<Option<V>> for TableDumpBuilder<V> {
+    fn extend<T: IntoIterator<Item=Option<V>>>(&mut self, iter: T) {
+        self.array.extend(iter)
+    }
+}
+
 impl<V> FromIterator<Option<V>> for Table<V> {
     fn from_iter<T: IntoIterator<Item=Option<V>>>(iter: T) -> Self {
         Self{
@@ -101,6 +212,88 @@ impl<V> FromIterator<Option<V>> for Table<V> {
             assoc: AssocTable::new(None),
         }
     }
+}
+
+pub struct TableMapBuilder<V> {
+    values: HashMap<Key, Option<V>>,
+    dead_keys: Vec<Key>,
+}
+
+impl<V> TableMapBuilder<V> {
+
+    #[must_use]
+    fn new() -> Self {
+        Self{
+            values: HashMap::new(),
+            dead_keys: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn finish(self) -> Table<V> {
+        let Self{mut values, dead_keys} = self;
+        let mut array = Vec::new();
+        let max_len = i32::try_from(values.len())
+            .unwrap_or(i32::MAX).saturating_mul(2);
+        let mut array_len: usize = 0;
+        for index in 1 ..= max_len {
+            let Some(value) = values.remove(&Key::Index(index)) else {
+                continue
+            };
+            let Some(value) = value else {
+                values.insert(Key::Index(index), value);
+                continue
+            };
+            let index = u32_to_usize((index - 1) as u32);
+            if array.len() <= index {
+                array.resize_with(index + 1, || None);
+            }
+            array[index] = Some(value);
+            array_len += 1;
+        }
+        while array_len.saturating_mul(2) < array.len() {
+            let index = i32::try_from(array.len()).unwrap();
+            let value = array.pop().unwrap();
+            array_len -= 1;
+            values.insert(Key::Index(index), value);
+            while array.last().is_some_and(Option::is_none) {
+                array.pop();
+            }
+        }
+        let mut table = Table::dump_builder(
+            Some(array.len().try_into().unwrap()),
+            ilog2_ceil(
+                usize::checked_add(values.len(), dead_keys.len())
+                    .unwrap()
+            ),
+        );
+        table.extend(array);
+        for (key, value) in values {
+            table.assoc_insert(key, value);
+        }
+        for key in dead_keys {
+            table.assoc_insert_dead(key);
+        }
+        table.finish()
+    }
+
+    pub fn insert(&mut self, key: Key, value: Option<V>) {
+        let old_value = self.values.insert(key, value);
+        assert!(old_value.is_none());
+    }
+
+    pub fn insert_name(&mut self, key: &'static str, value: Option<V>) {
+        self.insert(Key::from(key), value)
+    }
+
+    pub fn insert_assoc_dead(&mut self, key: Key) {
+        self.dead_keys.push(key);
+    }
+
+    pub fn insert_assoc_dead_name(&mut self, key: &'static str) {
+        self.insert_assoc_dead(Key::from(key))
+    }
+
 }
 
 pub struct TableDumpIter<'s, V> {
@@ -333,123 +526,5 @@ impl<V> TryFrom<Table<V>> for Vec<V> {
             std::convert::identity,
         )
     }
-}
-
-pub(super) struct TableLoadBuilder<V> {
-    array: Vec<Option<V>>,
-    assoc: AssocTableLoadBuilder<V>,
-}
-
-impl<V> TableLoadBuilder<V> {
-
-    #[must_use]
-    pub(super) fn new(array_len: u32, assoc_loglen: Option<u16>) -> Self {
-        let mut array = Vec::with_capacity(u32_to_usize(array_len));
-        array.resize_with(u32_to_usize(array_len), || None);
-        Self {
-            array,
-            assoc: AssocTableLoadBuilder::new(assoc_loglen),
-        }
-    }
-
-    pub(super) fn finish<E: load::Error>(self) -> Result<Table<V>, E> {
-        let Self{array, assoc} = self;
-        let assoc = assoc.finish::<E>()?;
-        Ok(Table{array, assoc})
-    }
-
-    pub(super) fn array_insert(&mut self, index: u32, value: V) {
-        //! `index` is 0-based
-        let index = u32_to_usize(index);
-        let old_value = self.array[index].replace(value);
-        assert!(old_value.is_none());
-    }
-
-    pub(super) fn assoc_insert(&mut self, index: u32, item: AssocItem<V>) {
-        //! `index` is 0-based
-        todo!("validate that the item is not shadowed by an array index");
-        self.assoc.insert(index, item);
-    }
-
-    pub(super) fn set_last_free(&mut self, last_free: u32) {
-        self.assoc.set_last_free(last_free)
-    }
-
-}
-
-pub struct TableBuilder<V> {
-    values: HashMap<Key, V>,
-    dead_keys: HashSet<Key>,
-}
-
-impl<V> TableBuilder<V> {
-
-    #[must_use]
-    fn new() -> Self {
-        Self{
-            values: HashMap::new(),
-            dead_keys: HashSet::new(),
-        }
-    }
-
-    #[must_use]
-    pub fn finish(self) -> Table<V> {
-        todo!()
-    }
-
-    pub fn expect_array_len(&mut self, len: usize) {
-        todo!()
-    }
-
-    pub fn insert(&mut self, key: Key, value: Option<V>) {
-        todo!()
-    }
-
-    pub fn insert_name(&mut self, key: &'static str, value: Option<V>) {
-        self.insert(Key::from(key), value)
-    }
-
-    pub fn insert_assoc_dead(&mut self, key: Key) {
-        todo!()
-    }
-
-    pub fn insert_assoc_dead_name(&mut self, key: &'static str) {
-        self.insert_assoc_dead(Key::from(key))
-    }
-
-}
-
-pub struct AssocTableBuilder<V> {
-    table: AssocTableDumpBuilder<V>,
-}
-
-impl<V> AssocTableBuilder<V> {
-
-    #[must_use]
-    fn new(loglen: Option<u16>) -> Self {
-        Self{table: AssocTableDumpBuilder::new(loglen)}
-    }
-
-    #[must_use]
-    pub fn finish(self) -> Table<V> {
-        Table { array: Vec::new(), assoc: self.table.finish() }
-    }
-
-    pub fn insert(&mut self, key: Key, value: Option<V>) {
-        self.table.insert(key, value)
-    }
-
-    pub fn insert_name(&mut self, key: &'static str, value: Option<V>) {
-        self.insert(Key::from(key), value)
-    }
-
-    pub fn insert_dead(&mut self, key: Key) {
-        self.table.insert_dead(key)
-    }
-
-    pub fn insert_dead_name(&mut self, key: &'static str) {
-        self.insert_dead(Key::from(key))
-    }
-
 }
 

@@ -4,13 +4,13 @@ use flate2::read::ZlibDecoder as UnZippingReader;
 
 use crate::{
     Exchange,
-    ascii::{self, Ascii, AsciiArray, AsciiStr},
+    ascii::{Ascii, AsciiStr},
     intlim::{Int62, Int31, decode_base62}, table::u32_to_usize,
 };
 
 use super::{
     error::Error,
-    reader::{Reader, AsciiReader},
+    reader::AsciiReader,
 };
 
 #[cold]
@@ -78,7 +78,6 @@ fn read_len_base31(reader: &mut AsciiReader) -> Result<usize, Error> {
 }
 
 fn unzip(data: &[u8]) -> Result<Vec<u8>, Error> {
-    use std::io::Write;
     let mut unzipper = UnZippingReader::new(
         data,
     );
@@ -88,7 +87,7 @@ fn unzip(data: &[u8]) -> Result<Vec<u8>, Error> {
 }
 
 fn read_encoded(reader: AsciiReader<'_>) -> Result<(Vec<u8>, Int62), Error> {
-    let mut decoder = Base62Decoder::new(reader);
+    let decoder = Base62Decoder::new(reader);
     let mut result = Vec::new();
     let checksum = decoder.read_all(&mut result)?;
     Ok((result, checksum))
@@ -111,10 +110,11 @@ impl<'r> Base62Decoder<'r> {
     }
     fn read_all(mut self, dest: &mut Vec<u8>) -> Result<Int62, Error> {
         while let Some(word) = self.emit_word()? {
-            dest.extend(word.to_le_bytes());
+            dest.extend::<[u8; WORD_LEN]>(word.to_le_bytes());
         }
         if !self.reader.is_empty() {
-            dest.extend(self.emit_final_word()?.to_le_bytes());
+            dest.extend::<[u8; WORD_LEN]>(
+                self.emit_final_word()?.to_le_bytes() );
         }
         let Self{checksum, ..} = self;
         Ok(Int62::divrem(checksum.0).1)
