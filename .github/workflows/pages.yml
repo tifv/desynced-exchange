@@ -1,0 +1,56 @@
+name: github-pages
+on:
+  push:
+    branches:
+    - publish
+  page_build:
+  workflow_dispatch:
+jobs:
+  build:
+    name: Build project
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+    - name: Ensure wasm-pack
+      run: |
+        cargo install wasm-pack
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Create build directory
+      run: |
+        mkdir ./build ./build/assets
+    - name: Copy static files
+      run: |
+        cp ./webconv/www/index.html ./build/index.html
+    - name: Compile
+      working-directory: ./webconv
+      run: |
+        wasm-pack build --target web
+    - name: Move Wasm package
+      run: |
+        mv ./webconv/pkg ./build/pkg
+    # - name: Get GitHub logo
+    #   run: |
+    #     wget https://github.githubassets.com/images/modules/logos_page/github-mark.zip &&
+    #     unzip github-mark.zip github-mark/github-mark.svg &&
+    #     mv ./github-mark/github-mark.svg -t ./build/assets/ || exit 0
+    - name: Upload
+      uses: actions/upload-pages-artifact@v1
+      with:
+        path: build
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: [build]
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v1
