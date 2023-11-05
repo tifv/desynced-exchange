@@ -37,7 +37,7 @@ pub struct Parameter {
         skip_serializing_if="Option::is_none",
         serialize_with="ser_option" )]
     pub name: Option<String>,
-    pub is_input: bool,
+    pub is_output: bool,
 }
 
 impl TryFrom<v::Value> for Behavior {
@@ -133,7 +133,7 @@ impl BehaviorBuilder {
             let v::Value::Boolean(value) = value else {
                 return Err(Self::err_parameters());
             };
-            this.push(Parameter{is_input: value, name: None});
+            this.push(Parameter{is_output: value, name: None});
         }
         Ok(())
     }
@@ -156,7 +156,7 @@ impl BehaviorBuilder {
         for (index, value) in parameter_names {
             let Some(index) = index.as_index()
                 .map(usize::try_from).and_then(Result::ok)
-                .filter(|&x| x > 0) 
+                .and_then(|x| x.checked_sub(1_usize))
             else {
                 return Err(Self::err_param_names());
             };
@@ -238,7 +238,7 @@ impl From<Behavior> for v::Value {
         if !this.parameters.is_empty() {
             table.assoc_insert_name("parameters", Some(
                 this.parameters.iter()
-                    .map(|param| Some(v::Value::Boolean(param.is_input)))
+                    .map(|param| Some(v::Value::Boolean(param.is_output)))
                     .collect::<v::Value>()
             ));
             table.assoc_insert_name("pnames", Some(

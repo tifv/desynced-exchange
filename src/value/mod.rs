@@ -191,11 +191,5 @@ pub(crate) mod test {
         assert_eq!(reencoded, encode(revalue).unwrap());
     }
 
-    #[test]
-    fn test_2_load() {
-        let exchange = test::EXCHANGE_BEHAVIOR_2;
-        load::load_blueprint::<Value, Value>(exchange).unwrap();
-    }
-
 }
 

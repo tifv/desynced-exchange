@@ -72,5 +72,14 @@ mod test {
             else { panic!("should be a behavior") };
         dump_blueprint(Exchange::Behavior(behavior)).unwrap();
     }
+
+    #[test]
+    fn test_load_behavior_3_param() {
+        let exchange = crate::test::EXCHANGE_BEHAVIOR_3_PARAM;
+        let Exchange::Behavior(_behavior) =
+            load_blueprint(exchange).unwrap()
+            else { panic!("should be a behavior") };
+    }
+
 }
 
