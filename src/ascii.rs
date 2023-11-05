@@ -8,6 +8,80 @@ use thiserror::Error;
 #[error("Ascii decoding error")]
 pub(crate) struct AsciiError;
 
+pub(crate) trait IsAscii {
+    fn is_ascii(&self) -> bool;
+}
+
+pub(crate) const fn u8_is_ascii(value: u8) -> bool {
+    matches!(value, b'\x00' ..= b'\x7F')
+}
+
+pub(crate) const fn char_is_ascii(value: char) -> bool {
+    matches!(value, '\x00' ..= '\x7F')
+}
+
+pub(crate) const fn bytes_is_ascii(value: &[u8]) -> bool {
+    let mut i = 0;
+    while i < value.len() {
+        if u8_is_ascii(value[i]) { i += 1; continue };
+        return false;
+    }
+    true
+}
+
+pub(crate) const fn str_is_ascii(value: &str) -> bool {
+    bytes_is_ascii(value.as_bytes())
+}
+
+impl IsAscii for u8 {
+    #[inline]
+    fn is_ascii(&self) -> bool {
+        u8_is_ascii(*self)
+    }
+}
+
+impl IsAscii for char {
+    #[inline]
+    fn is_ascii(&self) -> bool {
+        char_is_ascii(*self)
+    }
+}
+
+impl IsAscii for [u8] {
+    #[inline]
+    fn is_ascii(&self) -> bool {
+        self.iter().all(IsAscii::is_ascii)
+    }
+}
+
+impl<const N: usize> IsAscii for [u8; N] {
+    #[inline]
+    fn is_ascii(&self) -> bool {
+        <[u8] as IsAscii>::is_ascii(self)
+    }
+}
+
+impl IsAscii for Vec<u8> {
+    #[inline]
+    fn is_ascii(&self) -> bool {
+        <[u8] as IsAscii>::is_ascii(self)
+    }
+}
+
+impl IsAscii for str {
+    #[inline]
+    fn is_ascii(&self) -> bool {
+        IsAscii::is_ascii(self.as_bytes())
+    }
+}
+
+impl IsAscii for String {
+    #[inline]
+    fn is_ascii(&self) -> bool {
+        <str as IsAscii>::is_ascii(self)
+    }
+}
+
 /// A byte that holds ASCII value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
@@ -302,7 +376,7 @@ impl From<AsciiString> for String {
 macro_rules! ascii_char {
     ($value:literal) => { {
         const VALUE: $crate::ascii::Ascii = {
-            assert!($value.is_ascii());
+            assert!($crate::ascii::char_is_ascii($value));
             // SAFETY: we just checked for ASCII value
             unsafe { $crate::ascii::Ascii::from_byte_unchecked(
                 $value as u8
@@ -318,7 +392,7 @@ macro_rules! ascii_str {
     ($value:literal) => { {
         const VALUE: &'static $crate::ascii::AsciiStr = {
             let value: &'static str = $value;
-            assert!(value.is_ascii());
+            assert!($crate::ascii::str_is_ascii(value));
             // SAFETY: we just checked for ASCII values
             unsafe { $crate::ascii::AsciiStr::from_bytes_unchecked(
                 value.as_bytes()

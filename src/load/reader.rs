@@ -108,7 +108,7 @@ impl<'data> Reader<'data> {
 
 }
 
-pub struct AsciiReader<'data> {
+pub(super) struct AsciiReader<'data> {
     reader: Reader<'data>,
 }
 
