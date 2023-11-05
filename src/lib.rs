@@ -246,6 +246,8 @@
 // #![warn(clippy::exhaustive_enums)]
 // #![warn(clippy::exhaustive_structs)]
 
+use serde::{Serialize, Deserialize};
+
 mod ascii;
 mod intlim;
 
@@ -262,7 +264,7 @@ mod test;
 
 const MAX_ASSOC_LOGLEN: u16 = 5;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Exchange<P, B> {
     Blueprint(P),
     Behavior(B),

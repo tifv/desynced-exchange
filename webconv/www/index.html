@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<meta charset="UTF-8">
+<html>
+<head>
+    <title>Desynced blueprint decoder/encoder</title>
+    <style>
+
+    </style>
+</head>
+<script src="/pkg/exchange_desynced_web.js" type="module"></script>
+<body>
+    <div>
+        <textarea id="input" style="min-width: 600px;" rows="15"></textarea>
+    </div>
+    <button id="decode">Decode</button>
+    <div id="output"></div>
+</body>
+<script type="module">
+    import * as exchange_desynced_web from "/pkg/exchange_desynced_web.js";
+
+    async function main() {
+        await exchange_desynced_web.default();
+        let input = document.getElementById("input");
+        let button = document.getElementById("decode");
+        let output = document.getElementById("output");
+        button.addEventListener("click", () => {
+            output.innerHTML = exchange_desynced_web.exchange_to_ron(
+                input.value
+            );
+        });
+    }
+    main()
+</script>
+</html>

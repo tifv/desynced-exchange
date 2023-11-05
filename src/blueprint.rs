@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{
     Exchange,
     load::error::Error as LoadError,
@@ -6,6 +8,7 @@ use crate::{
     behavior::Behavior,
 };
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Blueprint {
     _whatever: ()
 }
@@ -45,6 +48,13 @@ mod test {
     use crate::Exchange;
 
     use super::{load_blueprint, dump_blueprint};
+
+    #[test]
+    fn test_load_error() {
+        let exchange = "asdf";
+        let Err(_) = load_blueprint(exchange)
+            else { panic!("should be an error") };
+    }
 
     #[test]
     fn test_load_behavior_1_unit() {
