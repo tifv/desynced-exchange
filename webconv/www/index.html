@@ -24,9 +24,13 @@
         let button = document.getElementById("decode");
         let output = document.getElementById("output");
         button.addEventListener("click", () => {
-            output.innerHTML = exchange_desynced_web.exchange_to_ron(
-                input.value
-            );
+            try {
+                output.innerHTML = exchange_desynced_web.exchange_to_ron(
+                    input.value
+                );
+            } catch (error) {
+                output.innerHTML = error;
+            }
         });
     }
     main()
