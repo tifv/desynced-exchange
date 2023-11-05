@@ -7,7 +7,7 @@
 
     </style>
 </head>
-<script src="/pkg/exchange_desynced_web.js" type="module"></script>
+<script src="./pkg/exchange_desynced_web.js" type="module"></script>
 <body>
     <div>
         <textarea id="input" style="min-width: 600px;" rows="15"></textarea>
@@ -16,7 +16,7 @@
     <div id="output"></div>
 </body>
 <script type="module">
-    import * as exchange_desynced_web from "/pkg/exchange_desynced_web.js";
+    import * as exchange_desynced_web from "./pkg/exchange_desynced_web.js";
 
     async function main() {
         await exchange_desynced_web.default();
