@@ -1,5 +1,5 @@
 [package]
-name = "exchange-desynced-web"
+name = "desynced-exchange-web"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,7 +8,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 wasm-bindgen = "0.2.*"
-exchange-desynced = { path = ".." }
+desynced-exchange = { path = ".." }
 serde = { version = "=1.*"}
 ron = { version = "=0.8.*" }
 

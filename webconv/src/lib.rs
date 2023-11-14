@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 
-use exchange_desynced::blueprint;
+use desynced_exchange::blueprint;
 
 #[wasm_bindgen]
 pub fn exchange_to_ron(exchange: &str) -> Result<String, JsError> {
