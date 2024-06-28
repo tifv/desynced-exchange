@@ -1,3 +1,5 @@
+# compile with `wasm-pack build --target=web`
+
 [package]
 name = "desynced-exchange-web"
 version = "0.1.0"
@@ -11,4 +13,5 @@ wasm-bindgen = "0.2.*"
 desynced-exchange = { path = ".." }
 serde = { version = "=1.*"}
 ron = { version = "=0.8.*" }
+serde_json = { version = "=1.*" }
 

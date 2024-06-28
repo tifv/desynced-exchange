@@ -417,10 +417,10 @@ impl<V> MaybeSequence<V> for MaybeVec<V> {
 
 }
 
-impl<const N: usize, V> MaybeSequence<V> for Box<[Option<V>; N]> {
+impl<const N: usize, V> MaybeSequence<V> for [Option<V>; N] {
     fn new(_table_len: u32) -> Self {
         #[allow(clippy::use_self)]
-        Box::new([(); N].map(|()| None))
+        [(); N].map(|()| None)
     }
 
     fn insert(&mut self, index: i32, value: V) -> Result<(), TableIntoError> {
@@ -464,10 +464,48 @@ impl<V> Sequence<V> for Vec<V> {
     }
 }
 
-impl<const N: usize, V> Sequence<V> for Box<[Option<V>; N]> {
+impl<const N: usize, V> Sequence<V> for [Option<V>; N] {
     type Builder = Self;
     fn finish(this: Self) -> Result<Self, TableIntoError> {
         Ok(this)
+    }
+}
+
+pub struct LimitedVec<const N: usize, V> {
+    vec: Vec<Option<V>>,
+}
+
+impl<const N: usize, V> LimitedVec<N, V> {
+    #[must_use]
+    pub fn get(self) -> Vec<Option<V>> { self.vec }
+}
+
+impl<const N: usize, V> MaybeSequence<V> for LimitedVec<N, V> {
+    fn new(_table_len: u32) -> Self {
+        Self{vec: Vec::new()}
+    }
+
+    fn insert(&mut self, index: i32, value: V) -> Result<(), TableIntoError> {
+        if index < 1 {
+            return Err(TableIntoError::NonContinuous(index));
+        };
+        let index = u32_to_usize(index as u32);
+        if index > N {
+            return Err(TableIntoError::UnexpectedKey(Key::Index(index as i32)));
+        };
+        if self.vec.len() < index {
+            self.vec.resize_with(index, || None);
+        }
+        self.vec[index-1] = Some(value);
+        Ok(())
+    }
+}
+
+impl<const L: usize, V> Sequence<V> for LimitedVec<L, V> {
+    type Builder = Self;
+
+    fn finish(maybe_vec: Self) -> Result<Self, TableIntoError> {
+        Ok(maybe_vec)
     }
 }
 
@@ -511,8 +549,7 @@ impl<V> Table<V> {
         F: FnMut(String, V) -> Result<(), E>,
         EF: FnMut(TableIntoError) -> E,
     {
-        let _: Box<[_;0]> =
-            self.try_into_seq_and_named(consume_name, err_map)?;
+        let _: [_;0] = self.try_into_seq_and_named(consume_name, err_map)?;
         Ok(())
     }
 }

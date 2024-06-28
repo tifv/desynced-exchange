@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     load::error::Error as LoadError,
-    value::{self as v, Key, TableIntoError as TableError},
+    value::{self as v, Key, TableIntoError as TableError, LimitedVec},
     table::ilog2_ceil,
 };
 
-fn ser_option<T, S>(value: &Option<T>, ser: S)
+fn ser_option_some<T, S>(value: &Option<T>, ser: S)
 -> Result<S::Ok, S::Error>
 where T: Serialize, S: serde::Serializer {
     return value.as_ref().unwrap().serialize(ser)
@@ -18,11 +18,11 @@ where T: Serialize, S: serde::Serializer {
 pub struct Behavior {
     #[serde(
         skip_serializing_if="Option::is_none",
-        serialize_with="ser_option" )]
+        serialize_with="ser_option_some" )]
     pub name: Option<String>,
     #[serde(
         skip_serializing_if="Option::is_none",
-        serialize_with="ser_option" )]
+        serialize_with="ser_option_some" )]
     pub description: Option<String>,
     #[serde(skip_serializing_if="Vec::is_empty")]
     pub parameters: Vec<Parameter>,
@@ -35,7 +35,7 @@ pub struct Behavior {
 pub struct Parameter {
     #[serde(
         skip_serializing_if="Option::is_none",
-        serialize_with="ser_option" )]
+        serialize_with="ser_option_some" )]
     pub name: Option<String>,
     pub is_output: bool,
 }
@@ -258,8 +258,8 @@ impl From<Behavior> for v::Value {
     }
 }
 
-// the worst known case is `"switch"` operation, 11 args
-const INSTRUCTION_MAX_ARGS: usize = 16;
+// subroutines can create instructions with an arbitrary number of parameters
+const INSTRUCTION_MAX_ARGS: usize = 256;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Instruction {
@@ -273,29 +273,29 @@ pub struct Instruction {
 
     #[serde( rename="cmt",
         skip_serializing_if="Option::is_none",
-        serialize_with="ser_option" )]
+        serialize_with="ser_option_some" )]
     pub comment: Option<String>,
 
     #[serde( rename="offset",
         skip_serializing_if="Option::is_none",
-        serialize_with="ser_option" )]
+        serialize_with="ser_option_some" )]
     pub repr_offset: Option<(f64, f64)>,
 
     // uncommon parameters
 
     #[serde( rename="c",
         skip_serializing_if="Option::is_none",
-        serialize_with="ser_option" )]
+        serialize_with="ser_option_some" )]
     pub variant: Option<i32>,
 
     #[serde( rename="txt",
         skip_serializing_if="Option::is_none",
-        serialize_with="ser_option" )]
+        serialize_with="ser_option_some" )]
     pub text: Option<String>,
 
     #[serde( rename="sub",
         skip_serializing_if="Option::is_none",
-        serialize_with="ser_option" )]
+        serialize_with="ser_option_some" )]
     pub subroutine: Option<i32>,
 
 }
@@ -338,8 +338,7 @@ impl InstructionBuilder {
     fn build_from(table: v::Table) -> Result<Instruction, LoadError> {
         const MAX_ARGS: usize = INSTRUCTION_MAX_ARGS;
         let mut this = InstructionBuilder::default();
-        let array: Box<[_; MAX_ARGS]>
-        = table.try_into_seq_and_named(
+        let array: LimitedVec<MAX_ARGS, _> = table.try_into_seq_and_named(
             |name, value| match name.as_str() {
                 "op"  => this.set_operation (value),
                 "next"=> this.set_next      (value),
@@ -352,11 +351,10 @@ impl InstructionBuilder {
                 _ => Err(Self::err_unexpected_key(Key::Name(name))),
             },
             Self::err_from_table_index )?;
+        let array = array.get();
+        this.args.resize_with(array.len(), || None);
         for (index, value) in array.into_iter().enumerate() {
             let Some(value) = value else { continue };
-            if this.args.len() <= index {
-                this.args.resize_with(index + 1, || None);
-            }
             this.args[index] = Some(Operand::try_from(value)?);
         }
         this.finish()
@@ -518,7 +516,12 @@ impl From<Instruction> for v::Value {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum Operand {
 
-    // this can indicate either `Jump::Return` or a lack of value,
+    // this can indicate either `Jump::Next` or a lack of value/place,
+    // depending on operation.
+    #[serde(rename="Unset")]
+    UnknownUnset,
+
+    // this can indicate either `Jump::Return` or a lack of value/place,
     // depending on operation.
     #[serde(rename="Skipped")]
     UnknownSkipped,
@@ -543,7 +546,50 @@ pub enum Operand {
 impl Operand {
     fn unwrap_option(this: Option<Operand>) -> Operand {
         if let Some(this) = this { return this; }
-        Operand::Jump(Jump::Next)
+        Operand::UnknownUnset
+    }
+    pub fn make_jump(&mut self) -> Result<(), LoadError> {
+        match *self {
+            Self::Jump(_) => (),
+            Self::Place(_) | Self::Value(_) => return Err(LoadError::from(
+                "operand cannot be interpreted as a jump" )),
+            Self::UnknownUnset => *self = Self::Jump(Jump::Next),
+            Self::UnknownSkipped => *self = Self::Jump(Jump::Return),
+            Self::UnknownIndex(index) => *self = Self::Jump(Jump::Jump(index)),
+        }
+        Ok(())
+    }
+    pub fn make_place(&mut self) -> Result<(), LoadError> {
+        match *self {
+            Self::Place(_) => (),
+            Self::Jump(_) | Self::Value(_) => return Err(LoadError::from(
+                "operand cannot be interpreted as a place" )),
+            Self::UnknownUnset | Self::UnknownSkipped =>
+                *self = Self::Place(None),
+            Self::UnknownIndex(index) =>
+                *self = Self::Place(Some(Place::try_from(index)?)),
+        }
+        Ok(())
+    }
+    pub fn make_value(&mut self) -> Result<(), LoadError> {
+        match *self {
+            Self::Value(_) => (),
+            Self::Jump(_) | Self::Place(_) | Self::UnknownIndex(_) =>
+                return Err(LoadError::from(
+                    "operand cannot be interpreted as a value" )),
+            Self::UnknownUnset | Self::UnknownSkipped =>
+                *self = Self::Value(None),
+        }
+        Ok(())
+    }
+}
+
+impl TryFrom<Option<v::Value>> for Operand {
+    type Error = LoadError;
+    fn try_from(value: Option<v::Value>) -> Result<Self, Self::Error> {
+        Ok(Self::unwrap_option(
+            value.map(Self::try_from).transpose()?
+        ))
     }
 }
 
@@ -579,10 +625,11 @@ impl From<Operand> for Option<v::Value> {
             Operand::Jump(index) => Option::<v::Value>::from(index),
             Operand::Place(Some(place)) => Some(v::Value::from(place)),
             Operand::Value(Some(value)) => Some(v::Value::from(value)),
-            Operand::UnknownIndex(index) => Some(v::Value::Integer(index)),
+            Operand::UnknownUnset => None,
             Operand::UnknownSkipped |
             Operand::Place(None) | Operand::Value(None)
                 => Some(v::Value::Boolean(false)),
+            Operand::UnknownIndex(index) => Some(v::Value::Integer(index)),
         }
     }
 }
@@ -646,6 +693,7 @@ impl Place {
     -> Result<S::Ok, S::Error>
     where S: serde::Serializer {
         let Some(this) = this else {
+            // XXX what about deserializing this?
             return ser.serialize_unit_variant(
                 "Operand", 3, "SkippedPlace" );
         };
@@ -657,18 +705,25 @@ impl TryFrom<v::Value> for Place {
     type Error = LoadError;
     fn try_from(value: v::Value) -> Result<Self, Self::Error> {
         Ok(match value {
-            v::Value::Integer(index @ 1 ..= i32::MAX) =>
-                Place::Parameter(index),
-            v::Value::Integer(index @ -4 ..= -1) =>
-                Place::Register(Register::try_from(index)?),
+            v::Value::Integer(index) =>
+                return Place::try_from(index),
             v::Value::String(name) => Place::Variable(name),
-            v::Value::Integer(i32::MIN ..= 0) =>
-                return Err(LoadError::from(
-                    "operand cannot be a negative number \
-                     except for register codes" )),
             _ => return Err(LoadError::from(
                 "operand should be a string or an integer" )),
     })
+    }
+}
+
+impl TryFrom<i32> for Place {
+    type Error = LoadError;
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        Ok(match value {
+            index @ 1 ..= i32::MAX => Place::Parameter(index),
+            index @ -4 ..= -1 => Place::Register(Register::try_from(index)?),
+            i32::MIN ..= 0 => return Err(LoadError::from(
+                "operand cannot be a negative number \
+                 except for register codes" )),
+        })
     }
 }
 
@@ -739,6 +794,7 @@ impl Value {
     -> Result<S::Ok, S::Error>
     where S: serde::Serializer {
         let Some(this) = this else {
+            // XXX what about deserializing this?
             return ser.serialize_unit_variant(
                 "Operand", 3, "SkippedValue" );
         };

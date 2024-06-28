@@ -1,6 +1,6 @@
 mod table;
 
-pub use table::{Key, TableIntoError};
+pub use table::{Key, TableIntoError, LimitedVec};
 
 use crate::{
     dump,
