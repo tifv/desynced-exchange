@@ -11,39 +11,153 @@
     </style>
 </head>
 <body>
-    <div id="exchange-mode">
-
+    <div style="color: red;"
+        >Doesn't actually work for blueprints yet, only for behaviors.</div>
+    <div id="game-mode">
+        <h2>Encoded (blueprint/behavior string)</h2>
+        <textarea style="min-width: 600px;" rows="15"></textarea>
+        <button data-action="game-to-ron">Decode to RON</button>
+        <button data-action="game-to-json">Decode to JSON</button>
     </div>
     <div id="ron-mode">
-
+        <h2>Decoded (RON)</h2>
+        <textarea style="min-width: 600px;" rows="15"></textarea>
+        <button data-action="ron-to-game">Encode</button>
     </div>
     <div id="json-mode">
-
+        <h2>Decoded (JSON)</h2>
+        <textarea style="min-width: 600px;" rows="15"></textarea>
+        <button data-action="json-to-game">Encode</button>
     </div>
-    <div>
-        <textarea id="input" style="min-width: 600px;" rows="15"></textarea>
-    </div>
-    <button id="decode">Decode</button>
-    <div id="output"></div>
 </body>
 <script type="module">
     import * as desynced_exchange_web from "./pkg/desynced_exchange_web.js";
 
+    class StateMaintainer {
+        constructor(states, startState) {
+            this.states = states;
+            this._checkState(startState);
+            this.state = startState;
+        }
+        _checkState(state) {
+            if (state === null) {
+                throw new Error("Valid state cannot be null");
+            }
+            if (this.states[state] === undefined) {
+                throw new Error("Undefined state " + state);
+            }
+        }
+        async switchState(action, oldState, newState) {
+            if (oldState === null) {
+                throw new Error("Invalid action old state");
+            }
+            if (newState === null) {
+                throw new Error("Invalid action new state");
+            } else {
+                this._checkState(newState);
+            }
+            if (this.state !== oldState) {
+                throw new Error("Out-of-order action");
+            }
+            this.states[this.state].exit.call(this);
+            this.state = null;
+            let result;
+            try {
+                result = await action();
+                this.state = newState;
+                this.states[this.state].enter.call(this);
+            } catch (error) {
+                this.state = oldState;
+                this.states[this.state].enter.call(this);
+                throw error;
+            }
+            return result;
+        }
+    }
+
     async function main() {
         await desynced_exchange_web.default();
-        let input = document.getElementById("input");
-        let button = document.getElementById("decode");
-        let output = document.getElementById("output");
-        button.addEventListener("click", () => {
-            try {
-                output.innerHTML = desynced_exchange_web.exchange_to_ron(
-                    input.value
-                );
-            } catch (error) {
-                output.innerHTML = error;
+        let state = new StateMaintainer({
+            "game": {
+                enter() {
+                    document.getElementById("game-mode").style
+                        .setProperty("display", null);
+                },
+                exit() {
+                    document.getElementById("game-mode").style
+                        .setProperty("display", "none");
+                },
+            },
+            "ron": {
+                enter() {
+                    document.getElementById("ron-mode").style
+                        .setProperty("display", null);
+                },
+                exit() {
+                    document.getElementById("ron-mode").style
+                        .setProperty("display", "none");
+                },
+            },
+            "json": {
+                enter() {
+                    document.getElementById("json-mode").style
+                        .setProperty("display", null);
+                },
+                exit() {
+                    document.getElementById("json-mode").style
+                        .setProperty("display", "none");
+                },
             }
-        });
+        }, "game");
+        state.states.game.enter();
+        state.states.ron.exit();
+        state.states.json.exit();
+        document.getElementById("game-mode")
+            .querySelector("button[data-action=game-to-ron]")
+            .addEventListener("click", () => {
+                state.switchState(() => {
+                    let [input] = document.getElementById("game-mode")
+                        .getElementsByTagName('textarea');
+                    let [output] = document.getElementById("ron-mode")
+                        .getElementsByTagName('textarea');
+                    output.value = desynced_exchange_web.exchange_to_ron(input.value)
+                }, "game", "ron",
+            )});
+        document.getElementById("game-mode")
+            .querySelector("button[data-action=game-to-json]")
+            .addEventListener("click", () => {
+                state.switchState(() => {
+                    let [input] = document.getElementById("game-mode")
+                        .getElementsByTagName('textarea');
+                    let [output] = document.getElementById("json-mode")
+                        .getElementsByTagName('textarea');
+                    output.value = desynced_exchange_web.exchange_to_json(input.value)
+                }, "game", "json",
+            )});
+        document.getElementById("ron-mode")
+            .querySelector("button[data-action=ron-to-game]")
+            .addEventListener("click", () => {
+                state.switchState(() => {
+                    let [input] = document.getElementById("ron-mode")
+                        .getElementsByTagName('textarea');
+                    let [output] = document.getElementById("game-mode")
+                        .getElementsByTagName('textarea');
+                    output.value = desynced_exchange_web.ron_to_exchange(input.value)
+                }, "ron", "game",
+            )});
+        document.getElementById("json-mode")
+            .querySelector("button[data-action=json-to-game]")
+            .addEventListener("click", () => {
+                state.switchState(() => {
+                    let [input] = document.getElementById("json-mode")
+                        .getElementsByTagName('textarea');
+                    let [output] = document.getElementById("game-mode")
+                        .getElementsByTagName('textarea');
+                    output.value = desynced_exchange_web.json_to_exchange(input.value)
+                }, "json", "game",
+            )});
     }
-    main()
+
+    main();
 </script>
 </html>
