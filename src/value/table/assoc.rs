@@ -72,7 +72,7 @@ impl<V> Item<V> {
         let link_mut = match &mut self {
             Self::Live { link, .. } | Self::Dead { link } => link,
         };
-        *link_mut = (*link_mut) + (old_index as i32) - (new_index as i32);
+        *link_mut += old_index as i32 - new_index as i32;
         self
     }
     fn relink(&mut self, new_link: i32) {
@@ -90,7 +90,8 @@ const fn mask(loglen: u16) -> u32 {
 
 #[derive(Debug, Clone)]
 pub(super) struct Table<V> {
-    // invariant: if `items` is Some than `items.len()`` is a power of two
+    // SAFETY-BEARING invariant:
+    // if `items` is Some than `items.len()`` is a power of two
     items: Option<Box<[Option<Item<V>>]>>,
     last_free: u32,
 }
@@ -124,9 +125,6 @@ impl<V> Table<V> {
     pub fn last_free(&self) -> u32 {
         self.last_free
     }
-}
-
-impl<V> Table<V> {
     pub fn dump_iter(&self) -> TableDumpIter<'_, V> {
         TableDumpIter{
             items: self.items.as_ref().map_or_else(
@@ -136,6 +134,49 @@ impl<V> Table<V> {
             last_free: self.last_free(),
         }
     }    
+}
+
+impl<V> Table<V> {
+    fn validate_positions<E: load::Error>(&self) -> Result<(), E> {
+        let Some(items) = self.items.as_deref() else {
+            return Ok(());
+        };
+        // SAFETY: `items` has a size of a power of two
+        let loglen = unsafe { ilog2_exact(items.len()).unwrap_unchecked() };
+        let len = iexp2(Some(loglen));
+        let mut unvalidated: Vec<Option<u32>> = items.iter().map( |item| {
+            let item = item.as_ref()?;
+            item.main_position(loglen)
+        }).collect();
+        for position in 0 .. len {
+            let mut index = u32_to_usize(position);
+            let mut steps = 0;
+            loop {
+                if unvalidated[index] == Some(position) {
+                    unvalidated[index] = None;
+                }
+                let link = match items[index] {
+                    Some(Item::Dead{link} | Item::Live{link, ..})
+                        if link != 0 => link,
+                    _ => break,
+                };
+                index = index.wrapping_add((link as isize) as usize);
+                steps += 1;
+                if steps >= len {
+                    return Err(E::from(
+                        "node chain should not form a loop" ));
+                }
+            }
+        }
+        for position in 0 .. len {
+            let index = u32_to_usize(position);
+            if unvalidated[index].is_some() {
+                return Err(E::from(
+                    "table key should be in a valid position" ));
+            }
+        }
+        Ok(())
+    }
 }
 
 pub(super) struct TableDumpIter<'s, V> {
@@ -207,43 +248,7 @@ impl<V> TableLoadBuilder<V> {
             return Err(E::from(
                 "last free index should not exceed table size" ));
         }
-        let Some(items) = self.table.items.as_deref() else {
-            return Ok(self.table);
-        };
-        // SAFETY: `items` has a size of a power of two
-        let loglen = unsafe { ilog2_exact(items.len()).unwrap_unchecked() };
-        let len = iexp2(Some(loglen));
-        let mut unvalidated: Vec<_> = items.iter().map( |item| {
-            let item = item.as_ref()?;
-            item.main_position(loglen)
-        }).collect();
-        for position in 0 .. len {
-            let mut index = u32_to_usize(position);
-            let mut steps = 0;
-            loop {
-                if unvalidated[index] == Some(position) {
-                    unvalidated[index] = None;
-                }
-                let link = match items[index] {
-                    Some(Item::Dead{link} | Item::Live{link, ..})
-                        if link != 0 => link,
-                    _ => break,
-                };
-                index = index.wrapping_add((link as isize) as usize);
-                steps += 1;
-                if steps >= len {
-                    return Err(E::from(
-                        "node chain should not form a loop" ));
-                }
-            }
-        }
-        for position in 0 .. len {
-            let index = u32_to_usize(position);
-            if unvalidated[index].is_some() {
-                return Err(E::from(
-                    "table key should be in a valid position" ));
-            }
-        }
+        self.table.validate_positions::<E>()?;
         Ok(self.table)
     }
 
@@ -313,7 +318,7 @@ impl<V> TableDumpBuilder<V> {
         item: InsertItem<V>,
     ) {
         let loglen = self.table.loglen()
-            .expect("the table should have free space");
+            .expect("the table should have some space");
         let main_index = item.position(loglen);
         if let free @ &mut None = self.get_mut(main_index) {
             // Lua here would fill dead position as well as free.
@@ -323,7 +328,7 @@ impl<V> TableDumpBuilder<V> {
             return;
         }
         let Some(free_index) = self.find_free_index() else {
-            unreachable!("the table should have free space");
+            panic!("the table should have free space");
         };
         let other_index = self.get_mut(main_index)
             .as_ref().unwrap()
@@ -385,3 +390,34 @@ impl<V> TableDumpBuilder<V> {
     }
 
 }
+
+#[cfg(test)]
+mod test {
+
+use crate::{
+    table::ilog2_ceil,
+    load::error::Error as LoadError,
+};
+
+use super::Key;
+
+use super::TableDumpBuilder;
+
+fn test_positions<'s>(keys: impl ExactSizeIterator<Item=&'s str>) {
+    let loglen = ilog2_ceil(keys.len());
+    let mut table = TableDumpBuilder::new(loglen);
+    for key in keys {
+        table.insert(Key::Name(String::from(key)), Some(42));
+    }
+    table.finish().validate_positions::<LoadError>().unwrap();
+}
+
+#[test]
+fn test_positions_1() {
+    #![allow(clippy::string_slice)]
+    let aaa = "aaaaaaaaaaaaaaaa";
+    test_positions((0..16).map(|i| &aaa[..=i]));
+}
+
+}
+
