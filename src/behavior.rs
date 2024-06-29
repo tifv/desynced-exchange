@@ -1,6 +1,10 @@
 #![allow(clippy::use_self)]
 
-use serde::{Deserialize, Serialize};
+use std::marker::PhantomData;
+
+use serde::{
+    Deserialize, Serialize
+};
 
 use crate::{
     load::error::Error as LoadError,
@@ -28,19 +32,25 @@ mod serde_option_some {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Behavior {
+
     #[serde( default,
         skip_serializing_if="Option::is_none",
         with="serde_option_some" )]
     pub name: Option<String>,
+
     #[serde( default,
         skip_serializing_if="Option::is_none",
         with="serde_option_some" )]
     pub description: Option<String>,
+
     #[serde(default, skip_serializing_if="Vec::is_empty")]
     pub parameters: Vec<Parameter>,
+
     pub instructions: Vec<Instruction>,
+
     #[serde(default, skip_serializing_if="Vec::is_empty")]
     pub subroutines: Vec<Behavior>,
+
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -279,6 +289,8 @@ pub struct Instruction {
     #[serde(rename="op")]
     pub operation: String,
 
+    #[serde( default,
+        skip_serializing_if="Vec::is_empty" )]
     pub args: Vec<Operand>,
 
     pub next: Jump,
@@ -309,6 +321,9 @@ pub struct Instruction {
         skip_serializing_if="Option::is_none",
         with="serde_option_some" )]
     pub subroutine: Option<i32>,
+
+    // XXX there may be other uncommon parameters;
+    // perhaps it is wise to unite them in a vector or a map
 
 }
 
@@ -525,7 +540,8 @@ impl From<Instruction> for v::Value {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum Operand {
 
     // this can indicate either `Jump::Next` or a lack of value/place,
@@ -547,10 +563,12 @@ pub enum Operand {
     #[serde(untagged)]
     Jump(Jump),
 
-    #[serde(untagged, serialize_with="serde_option_place::serialize")]
+    #[serde( untagged,
+        serialize_with="serde_option_place::serialize" )]
     Place(Option<Place>),
 
-    #[serde(untagged, serialize_with="Value::serialize_option")]
+    #[serde( untagged,
+        serialize_with="Value::serialize_option" )]
     Value(Option<Value>),
 
 }
@@ -593,6 +611,109 @@ impl Operand {
                 *self = Self::Value(None),
         }
         Ok(())
+    }
+}
+
+struct OperandVisitor;
+
+impl<'de> serde::de::Visitor<'de> for OperandVisitor {
+    type Value = Operand;
+    fn expecting(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result
+    {
+        write!(fmt, "an operand")
+    }
+    fn visit_enum<A>(self, data: A)
+    -> Result<Self::Value, A::Error>
+    where A: serde::de::EnumAccess<'de>
+    {
+        use serde::de::VariantAccess;
+        #[derive(Deserialize)]
+        enum OperandType {
+            Unset, Skipped, Index,
+            Return, Next, Jump,
+            SkippedPlace, Parameter, Register, Variable,
+            SkippedValue, Number, Item, ItemCount, Coord, CoordCount,
+        }
+        use OperandType as T;
+        let (op_name, contents) = data.variant::<OperandType>()?;
+        Ok(match op_name {
+            T::Unset => { contents.unit_variant()?;
+                Operand::UnknownUnset },
+            T::Skipped => { contents.unit_variant()?;
+                Operand::UnknownSkipped },
+            T::Index => {
+                let index = contents.newtype_variant()?;
+                Operand::UnknownIndex(index) },
+            T::Return => { contents.unit_variant()?;
+                Operand::Jump(Jump::Return) },
+            T::Next => { contents.unit_variant()?;
+                Operand::Jump(Jump::Next) },
+            T::Jump => {
+                let index = contents.newtype_variant()?;
+                Operand::Jump(Jump::Jump(index)) },
+            T::SkippedPlace => { contents.unit_variant()?;
+                Operand::Place(None) },
+            T::Parameter => {
+                let index = contents.newtype_variant()?;
+                Operand::Place(Some(Place::Parameter(index))) },
+            T::Register => {
+                let register = contents.newtype_variant()?;
+                Operand::Place(Some(Place::Register(register))) },
+            T::Variable => {
+                let var_name = contents.newtype_variant()?;
+                Operand::Place(Some(Place::Variable(var_name))) },
+            T::SkippedValue => { contents.unit_variant()?;
+                Operand::Value(None) },
+            T::Number => {
+                let count = contents.newtype_variant()?;
+                Operand::Value(Some(Value::Number(count))) },
+            T::Item => {
+                let id = contents.newtype_variant()?;
+                Operand::Value(Some(Value::Item(id))) },
+            T::ItemCount => {
+                let (id, count) = contents.tuple_variant(2, PairVisitor::new())?;
+                Operand::Value(Some(Value::ItemCount(id, count))) },
+            T::Coord => { let coord = contents.newtype_variant()?;
+                Operand::Value(Some(Value::Coord(coord))) },
+            T::CoordCount => {
+                let (coord, count) = contents.tuple_variant(2, PairVisitor::new())?;
+                Operand::Value(Some(Value::CoordCount(coord, count))) },
+        })
+    }
+}
+
+struct PairVisitor<A, B>(PhantomData<(A, B)>);
+
+impl<A, B> PairVisitor<A, B> {
+    fn new() -> Self { Self(PhantomData) }
+}
+
+impl<'de, V, W> serde::de::Visitor<'de> for PairVisitor<V, W>
+where V: Deserialize<'de>, W: Deserialize<'de>
+{
+    type Value = (V, W);
+    fn expecting(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(fmt, "a pair of values")
+    }
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where A: serde::de::SeqAccess<'de>
+    {
+        let custom_err = <A::Error as serde::de::Error>::custom;
+        let a = seq.next_element()?.ok_or_else( ||
+            custom_err("missing first element of the pair"))?;
+        let b = seq.next_element()?.ok_or_else( ||
+            custom_err("missing second element of the pair"))?;
+        Ok((a, b))
+    }
+}
+
+
+impl<'de> Deserialize<'de> for Operand {
+    fn deserialize<D>(de: D) -> Result<Self, D::Error>
+    where D: serde::de::Deserializer<'de>
+    {
+        let visitor = OperandVisitor;
+        de.deserialize_enum("Operand", &[], visitor)
     }
 }
 
@@ -646,7 +767,7 @@ impl From<Operand> for Option<v::Value> {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Jump {
     Return,
     Next,
@@ -693,7 +814,7 @@ impl From<Jump> for Option<v::Value> {
 }
 
 /// Place arguments to instructions
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Place {
     Parameter(i32),
     Register(Register),
@@ -753,7 +874,7 @@ impl From<Place> for v::Value {
 }
 
 #[repr(i32)]
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Register {
     Signal = -4,
     Visual = -3,
@@ -795,7 +916,7 @@ impl From<Register> for v::Value {
 }
 
 /// Value arguments to operations
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Value {
     Number(i32),
     Item(String),
@@ -912,7 +1033,7 @@ impl From<Value> for v::Value {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Coord {
     pub x: i32,
     pub y: i32,
@@ -971,5 +1092,42 @@ impl From<Coord> for v::Value {
         table.assoc_insert(Key::from("y"), Some(v::Value::Integer(this.y)));
         v::Value::Table(table.finish())
     }
+}
+
+#[cfg(test)]
+mod test {
+
+use super::{Coord, Operand, Place, Register, Value};
+
+#[test]
+fn test_operand_serde_ron() {
+    for (op, op_str) in [
+        (Operand::UnknownUnset,         "Unset"),
+        (Operand::UnknownSkipped,       "Skipped"),
+        (Operand::UnknownIndex(42),     "Index(42)"),
+        (Operand::Place(None),          "SkippedPlace"),
+        (Operand::Place(Some(Place::Parameter(42))),
+                                        "Parameter(42)" ),
+        (Operand::Place(Some(Place::Variable(String::from("ABC")))),
+                                        "Variable(\"ABC\")" ),
+        (Operand::Place(Some(Place::Register(Register::Signal))),
+                                        "Register(Signal)" ),
+        (Operand::Value(None),          "SkippedValue"),
+        (Operand::Value(Some(Value::Number(42))),
+                                        "Number(42)" ),
+        (Operand::Value(Some(Value::Item(String::from("coconut")))),
+                                        "Item(\"coconut\")" ),
+        (Operand::Value(Some(Value::ItemCount(String::from("coconut"), 42))),
+                                        "ItemCount(\"coconut\",42)" ),
+        (Operand::Value(Some(Value::Coord(Coord {x: 42, y: -42}))),
+                                        "Coord((x:42,y:-42))" ),
+        (Operand::Value(Some(Value::CoordCount(Coord {x: 42, y: -42}, 42))),
+                                        "CoordCount((x:42,y:-42),42)" ),
+    ] {
+        assert_eq!(ron::to_string(&op), Ok(String::from(op_str)));
+        assert_eq!(Ok(op), ron::from_str::<Operand>(op_str));
+    }
+}
+
 }
 

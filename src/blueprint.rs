@@ -8,15 +8,38 @@ use crate::{
     behavior::{Behavior, Value},
 };
 
+fn bool_true() -> bool { true }
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn bool_is_true(&b: &bool) -> bool { b }
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Blueprint {
+
     pub frame: String,
+
+    #[serde( default="bool_true",
+        skip_serializing_if="bool_is_true" )]
     pub powered: bool,
+
+    #[serde( default,
+        skip_serializing_if="Vec::is_empty" )]
     pub locks: Vec<Option<String>>,
-    pub logistics: Option<Vec<(String,bool)>>,
+
+    #[serde( default,
+        skip_serializing_if="Vec::is_empty" )]
+    pub logistics: Vec<(String,bool)>,
+
     pub components: Vec<Component>,
+
+    #[serde( default,
+        skip_serializing_if="Vec::is_empty" )]
     pub registers: Vec<Option<Value>>,
+
+    #[serde( default,
+        skip_serializing_if="Vec::is_empty" )]
     pub links: Vec<(i32,i32)>,
+
 }
 
 impl TryFrom<v::Value> for Blueprint {
@@ -36,7 +59,7 @@ impl From<Blueprint> for v::Value {
 pub struct Component {
     item: String,
     index: i32,
-    registers: Option<Vec<Option<Value>>>,
+    registers: Vec<Option<Value>>,
     behavior: Option<Behavior>,
 }
 
