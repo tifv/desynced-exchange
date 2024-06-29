@@ -8,34 +8,46 @@ use crate::{
     table::ilog2_ceil,
 };
 
-fn ser_option_some<T, S>(value: &Option<T>, ser: S)
--> Result<S::Ok, S::Error>
-where T: Serialize, S: serde::Serializer {
-    return value.as_ref().unwrap().serialize(ser)
+mod serde_option_some {
+    use serde::{
+        Serialize, Serializer,
+        Deserialize, Deserializer,
+    };
+
+    pub(super) fn serialize<T, S>(value: &Option<T>, ser: S)
+    -> Result<S::Ok, S::Error>
+    where T: Serialize, S: Serializer {
+        value.as_ref().unwrap().serialize(ser)
+    }
+    pub(super) fn deserialize<'de, T, D>(de: D)
+    -> Result<Option<T>, D::Error>
+    where  T: Deserialize<'de>, D: Deserializer<'de> {
+        Ok(Some(T::deserialize(de)?))
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Behavior {
-    #[serde(
+    #[serde( default,
         skip_serializing_if="Option::is_none",
-        serialize_with="ser_option_some" )]
+        with="serde_option_some" )]
     pub name: Option<String>,
-    #[serde(
+    #[serde( default,
         skip_serializing_if="Option::is_none",
-        serialize_with="ser_option_some" )]
+        with="serde_option_some" )]
     pub description: Option<String>,
-    #[serde(skip_serializing_if="Vec::is_empty")]
+    #[serde(default, skip_serializing_if="Vec::is_empty")]
     pub parameters: Vec<Parameter>,
     pub instructions: Vec<Instruction>,
-    #[serde(skip_serializing_if="Vec::is_empty")]
+    #[serde(default, skip_serializing_if="Vec::is_empty")]
     pub subroutines: Vec<Behavior>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Parameter {
-    #[serde(
+    #[serde( default,
         skip_serializing_if="Option::is_none",
-        serialize_with="ser_option_some" )]
+        with="serde_option_some" )]
     pub name: Option<String>,
     pub is_output: bool,
 }
@@ -271,31 +283,31 @@ pub struct Instruction {
 
     pub next: Jump,
 
-    #[serde( rename="cmt",
+    #[serde( default, rename="cmt",
         skip_serializing_if="Option::is_none",
-        serialize_with="ser_option_some" )]
+        with="serde_option_some" )]
     pub comment: Option<String>,
 
-    #[serde( rename="offset",
+    #[serde( default, rename="offset",
         skip_serializing_if="Option::is_none",
-        serialize_with="ser_option_some" )]
+        with="serde_option_some" )]
     pub repr_offset: Option<(f64, f64)>,
 
     // uncommon parameters
 
-    #[serde( rename="c",
+    #[serde( default, rename="c",
         skip_serializing_if="Option::is_none",
-        serialize_with="ser_option_some" )]
+        with="serde_option_some" )]
     pub variant: Option<i32>,
 
-    #[serde( rename="txt",
+    #[serde( default, rename="txt",
         skip_serializing_if="Option::is_none",
-        serialize_with="ser_option_some" )]
+        with="serde_option_some" )]
     pub text: Option<String>,
 
-    #[serde( rename="sub",
+    #[serde( default, rename="sub",
         skip_serializing_if="Option::is_none",
-        serialize_with="ser_option_some" )]
+        with="serde_option_some" )]
     pub subroutine: Option<i32>,
 
 }
@@ -535,7 +547,7 @@ pub enum Operand {
     #[serde(untagged)]
     Jump(Jump),
 
-    #[serde(untagged, serialize_with="Place::serialize_option")]
+    #[serde(untagged, serialize_with="serde_option_place::serialize")]
     Place(Option<Place>),
 
     #[serde(untagged, serialize_with="Value::serialize_option")]
@@ -688,8 +700,11 @@ pub enum Place {
     Variable(String),
 }
 
-impl Place {
-    fn serialize_option<S>(this: &Option<Place>, ser: S)
+mod serde_option_place {
+    use serde::Serialize;
+    use super::Place;
+
+    pub(super) fn serialize<S>(this: &Option<Place>, ser: S)
     -> Result<S::Ok, S::Error>
     where S: serde::Serializer {
         let Some(this) = this else {
