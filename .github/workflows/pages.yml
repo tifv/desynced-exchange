@@ -15,6 +15,8 @@ jobs:
     steps:
     - name: Ensure wasm-pack
       run: |
+        rustc --version
+        cargo --version
         cargo install wasm-pack
     - name: Checkout
       uses: actions/checkout@v3
