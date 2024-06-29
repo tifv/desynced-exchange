@@ -189,7 +189,7 @@ impl DD for &mut Dumper {
         table: T,
     ) -> Result<Self::Ok, Error>
     where
-        K: DumpKey, V: Dump,
+        K: DumpKey, V: Dump + 'v,
         T: DumpTableIterator<'v, Key=K, Value=V>,
     {
         let mut array_len = table.array_len();

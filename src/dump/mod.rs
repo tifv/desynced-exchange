@@ -78,7 +78,7 @@ pub trait Dumper : Sized {
         table: T,
     ) -> Result<Self::Ok, Self::Error>
     where
-        K: DumpKey, V: Dump,
+        K: DumpKey, V: Dump + 'v,
         T: DumpTableIterator<'v, Key=K, Value=V>,
     ;
 }
