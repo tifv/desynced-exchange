@@ -141,7 +141,7 @@ where K: std::fmt::Debug, V: std::fmt::Debug,
                 *link
             },
         };
-        if link > 0 {
+        if link != 0 {
             f.write_str(" *")?;
             link.fmt(f)?;
         }

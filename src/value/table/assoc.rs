@@ -72,14 +72,18 @@ impl<V> Item<V> {
         let link_mut = match &mut self {
             Self::Live { link, .. } | Self::Dead { link } => link,
         };
-        *link_mut += old_index as i32 - new_index as i32;
+        if *link_mut != 0 {
+            *link_mut += old_index as i32 - new_index as i32;
+        }
         self
     }
-    fn relink(&mut self, new_link: i32) {
+    fn relocate_link(&mut self, old_index: u32, new_index: u32) {
         let link_mut = match self {
             Self::Live { link, .. } | Self::Dead { link } => link,
         };
-        *link_mut = new_link;
+        if *link_mut != 0 {
+            *link_mut += new_index as i32 - old_index as i32;
+        }
     }
 }
 
@@ -148,23 +152,31 @@ impl<V> Table<V> {
             let item = item.as_ref()?;
             item.main_position(loglen)
         }).collect();
-        for position in 0 .. len {
-            let mut index = u32_to_usize(position);
+        for main_position in 0 .. len {
+            let mut position = main_position;
             let mut steps = 0;
             loop {
-                if unvalidated[index] == Some(position) {
+                let index = u32_to_usize(position);
+                if unvalidated[index] == Some(main_position) {
                     unvalidated[index] = None;
                 }
                 let link = match items[index] {
                     Some(Item::Dead{link} | Item::Live{link, ..})
-                        if link != 0 => link,
+                        if link != 0
+                        => link,
                     _ => break,
                 };
-                index = index.wrapping_add((link as isize) as usize);
+                let Some(next_position) = position.checked_add_signed(link)
+                    .filter(|&pos| pos < len)
+                else {
+                    return Err(E::from(
+                        "assoc node link should lead within bounds" ));
+                };
+                position = next_position;
                 steps += 1;
                 if steps >= len {
                     return Err(E::from(
-                        "node chain should not form a loop" ));
+                        "assoc node chain should not form a loop" ));
                 }
             }
         }
@@ -323,7 +335,7 @@ impl<V> TableDumpBuilder<V> {
         if let free @ &mut None = self.get_mut(main_index) {
             // Lua here would fill dead position as well as free.
             // But we are not Lua: we do not normally make dead positions,
-            // and when we do, we don't want to overwrite them.
+            // and even when we do, we don't want to overwrite them.
             *free = Some(item.into_item(0));
             return;
         }
@@ -366,7 +378,7 @@ impl<V> TableDumpBuilder<V> {
                 .relocate(main_index, free_index)
         );
         self.get_mut(prev_index).as_mut().unwrap()
-            .relink(free_index as i32 - other_index as i32);
+            .relocate_link(main_index, free_index);
     }
 
     fn get(&self, index: u32) -> &Option<Item<V>> {
@@ -393,6 +405,10 @@ impl<V> TableDumpBuilder<V> {
 
 #[cfg(test)]
 mod test {
+#![allow(clippy::string_slice)]
+#![allow(clippy::cast_lossless)]
+
+use std::slice;
 
 use crate::{
     table::ilog2_ceil,
@@ -403,20 +419,66 @@ use super::Key;
 
 use super::TableDumpBuilder;
 
-fn test_positions<'s>(keys: impl ExactSizeIterator<Item=&'s str>) {
-    let loglen = ilog2_ceil(keys.len());
-    let mut table = TableDumpBuilder::new(loglen);
+fn test_positions_for_keys_with_len<S>(
+    keys: impl Iterator<Item=S>,
+    loglen: Option<u16>,
+)
+where String: From<S>,
+{
+    let mut table = TableDumpBuilder::<()>::new(loglen);
     for key in keys {
-        table.insert(Key::Name(String::from(key)), Some(42));
+        table.insert(Key::Name(String::from(key)), None);
     }
-    table.finish().validate_positions::<LoadError>().unwrap();
+    let table = table.finish();
+    let err = table.validate_positions::<LoadError>();
+    if err.is_err() {
+        eprintln!("{table:?}");
+    }
+    err.unwrap();
+}
+
+fn test_positions_for_keys<S>(
+    keys: impl ExactSizeIterator<Item=S>,
+)
+where String: From<S>,
+{
+    let loglen = ilog2_ceil(keys.len());
+    test_positions_for_keys_with_len(keys, loglen)
+}
+
+fn test_positions_spacious_for_keys<S>(
+    keys: impl ExactSizeIterator<Item=S>,
+)
+where String: From<S>,
+{
+    let loglen = ilog2_ceil(2*keys.len());
+    test_positions_for_keys_with_len(keys, loglen)
 }
 
 #[test]
-fn test_positions_1() {
-    #![allow(clippy::string_slice)]
-    let aaa = "aaaaaaaaaaaaaaaa";
-    test_positions((0..16).map(|i| &aaa[..=i]));
+fn test_positions() {
+    fn iter_prefix(aaa: &str) -> impl ExactSizeIterator<Item=&'_ str> {
+        (0..aaa.len()).map(|i| &aaa[..=i])
+    }
+    fn iter_letters(abc: &str) -> impl ExactSizeIterator<Item=&'_ str> {
+        abc.as_bytes().iter().map(
+            |c| std::str::from_utf8(slice::from_ref(c)).unwrap()
+        )
+    }
+    for aaa in [
+        "a", "aa", "ab", "ba", "aaaa",
+        "aaaaaaaa", "aaaaaaaaaaaaaaaa",
+    ] {
+        test_positions_for_keys(iter_prefix(aaa));
+        test_positions_spacious_for_keys(iter_prefix(aaa));
+    }
+    for abc in [
+        "abcdefgh", "abcdefghij",
+        "ABCDEFGH", "ABCDEFGHIJ",
+    ] {
+        test_positions_for_keys(iter_letters(abc));
+        test_positions_spacious_for_keys(iter_letters(abc));
+    }
 }
 
 }
