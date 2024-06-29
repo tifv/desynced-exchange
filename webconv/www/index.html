@@ -4,30 +4,46 @@
 <head>
     <title>Desynced blueprint decoder/encoder</title>
     <style>
-        #output {
-            font-family: monospace;
-            white-space: pre;
+        .buttons__switch {
+            margin-block: 2ex;
         }
     </style>
 </head>
 <body>
-    <div style="color: red;"
-        >Doesn't actually work for blueprints yet, only for behaviors.</div>
     <div id="game-mode">
+        <div class="buttons buttons__switch">
+            <button data-action="goto-ron">Clear and switch to RON</button>
+            <button data-action="goto-json">Clear and switch to JSON</button>
+        </div>
         <h2>Encoded (blueprint/behavior string)</h2>
         <textarea style="min-width: 600px;" rows="15"></textarea>
-        <button data-action="game-to-ron">Decode to RON</button>
-        <button data-action="game-to-json">Decode to JSON</button>
+        <div class="buttons">
+            <button data-action="convert-game-to-ron">Decode to RON</button>
+            <button data-action="convert-game-to-json">Decode to JSON</button>
+        </div>
+        <div class="errors"></div>
     </div>
     <div id="ron-mode">
+        <div class="buttons buttons__switch">
+            <button data-action="goto-game">Clear and switch to blueprint</button>
+        </div>
         <h2>Decoded (RON)</h2>
         <textarea style="min-width: 600px;" rows="15"></textarea>
-        <button data-action="ron-to-game">Encode</button>
+        <div class="buttons">
+            <button data-action="convert-ron-to-game">Encode</button>
+        </div>
+        <div class="errors"></div>
     </div>
     <div id="json-mode">
+        <div class="buttons buttons__switch">
+            <button data-action="goto-game">Clear and switch to blueprint</button>
+        </div>
         <h2>Decoded (JSON)</h2>
         <textarea style="min-width: 600px;" rows="15"></textarea>
-        <button data-action="json-to-game">Encode</button>
+        <div class="buttons">
+            <button data-action="convert-json-to-game">Encode</button>
+        </div>
+        <div class="errors"></div>
     </div>
 </body>
 <script type="module">
@@ -59,16 +75,15 @@
             if (this.state !== oldState) {
                 throw new Error("Out-of-order action");
             }
-            this.states[this.state].exit.call(this);
             this.state = null;
             let result;
             try {
                 result = await action();
+                this.states[oldState].exit.call(this);
+                this.states[newState].enter.call(this);
                 this.state = newState;
-                this.states[this.state].enter.call(this);
             } catch (error) {
                 this.state = oldState;
-                this.states[this.state].enter.call(this);
                 throw error;
             }
             return result;
@@ -77,85 +92,82 @@
 
     async function main() {
         await desynced_exchange_web.default();
-        let state = new StateMaintainer({
-            "game": {
+        function setupState(state) {
+            let section = document.getElementById(state + "-mode");
+            return {
                 enter() {
-                    document.getElementById("game-mode").style
-                        .setProperty("display", null);
+                    section
+                        .style.setProperty("display", null);
                 },
                 exit() {
-                    document.getElementById("game-mode").style
+                    section.style
                         .setProperty("display", "none");
-                },
-            },
-            "ron": {
-                enter() {
-                    document.getElementById("ron-mode").style
-                        .setProperty("display", null);
-                },
-                exit() {
-                    document.getElementById("ron-mode").style
-                        .setProperty("display", "none");
-                },
-            },
-            "json": {
-                enter() {
-                    document.getElementById("json-mode").style
-                        .setProperty("display", null);
-                },
-                exit() {
-                    document.getElementById("json-mode").style
-                        .setProperty("display", "none");
+                    section.querySelector('textarea')
+                        .value = "";
+                    section.querySelector('.errors')
+                        .innerHTML = "";
                 },
             }
+        }
+        let state = new StateMaintainer({
+            "game": setupState("game"),
+            "ron" : setupState("ron" ),
+            "json": setupState("json"),
         }, "game");
         state.states.game.enter();
-        state.states.ron.exit();
+        state.states.ron .exit();
         state.states.json.exit();
-        document.getElementById("game-mode")
-            .querySelector("button[data-action=game-to-ron]")
-            .addEventListener("click", () => {
+        function defineConvert(src, dst, conversion) {
+            if (src == dst) {
+                throw new Error("invalid action");
+            }
+            let action = () => {
                 state.switchState(() => {
-                    let [input] = document.getElementById("game-mode")
-                        .getElementsByTagName('textarea');
-                    let [output] = document.getElementById("ron-mode")
-                        .getElementsByTagName('textarea');
-                    output.value = desynced_exchange_web.exchange_to_ron(input.value)
-                }, "game", "ron",
-            )});
-        document.getElementById("game-mode")
-            .querySelector("button[data-action=game-to-json]")
+                    try {
+                        let input = document.getElementById(src + "-mode")
+                            .querySelector('textarea');
+                        let output = document.getElementById(dst + "-mode")
+                            .querySelector('textarea');
+                        output.value = conversion(input.value.trim());
+                    } catch (error) {
+                        document.getElementById(src + "-mode")
+                            .querySelector('.errors')
+                            .innerHTML = error
+                        throw error;
+                    }
+                }, src, dst)
+            };
+            document.getElementById(src + "-mode")
+                .querySelector("button[data-action=convert-" + src + "-to-" + dst + "]")
+                .addEventListener("click", action);
+            // XXX need to detect last used RON/JSON
+            // document.getElementById(src + "-mode")
+            //     .querySelector("textarea")
+            //     .addEventListener("keydown", (e) => {
+            //         if (e.keyCode != 13 || !e.ctrlKey) {
+            //             return;
+            //         }
+            //         return action();
+            //     })
+        }
+        defineConvert("game", "ron" , desynced_exchange_web.exchange_to_ron );
+        defineConvert("game", "json", desynced_exchange_web.exchange_to_json);
+        defineConvert("ron" , "game", desynced_exchange_web.ron_to_exchange );
+        defineConvert("json", "game", desynced_exchange_web.json_to_exchange);
+        function defineGoto(src, dst) {
+            if (src == dst) {
+                throw new Error("invalid action");
+            }
+            document.getElementById(src + "-mode")
+            .querySelector("button[data-action=goto-" + dst + "]")
             .addEventListener("click", () => {
-                state.switchState(() => {
-                    let [input] = document.getElementById("game-mode")
-                        .getElementsByTagName('textarea');
-                    let [output] = document.getElementById("json-mode")
-                        .getElementsByTagName('textarea');
-                    output.value = desynced_exchange_web.exchange_to_json(input.value)
-                }, "game", "json",
-            )});
-        document.getElementById("ron-mode")
-            .querySelector("button[data-action=ron-to-game]")
-            .addEventListener("click", () => {
-                state.switchState(() => {
-                    let [input] = document.getElementById("ron-mode")
-                        .getElementsByTagName('textarea');
-                    let [output] = document.getElementById("game-mode")
-                        .getElementsByTagName('textarea');
-                    output.value = desynced_exchange_web.ron_to_exchange(input.value)
-                }, "ron", "game",
-            )});
-        document.getElementById("json-mode")
-            .querySelector("button[data-action=json-to-game]")
-            .addEventListener("click", () => {
-                state.switchState(() => {
-                    let [input] = document.getElementById("json-mode")
-                        .getElementsByTagName('textarea');
-                    let [output] = document.getElementById("game-mode")
-                        .getElementsByTagName('textarea');
-                    output.value = desynced_exchange_web.json_to_exchange(input.value)
-                }, "json", "game",
-            )});
+                state.switchState(() => {}, src, dst)
+            });
+        }
+        defineGoto("game", "ron" );
+        defineGoto("game", "json");
+        defineGoto("ron" , "game");
+        defineGoto("json", "game");
     }
 
     main();
