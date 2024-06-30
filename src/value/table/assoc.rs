@@ -363,9 +363,11 @@ impl<V> TableDumpBuilder<V> {
             {
                 &Item::Dead { link } | &Item::Live { link, .. }
                     if link != 0 => link,
-                _ => unreachable!(),
+                _ => panic!("table invariant is broken"),
             };
-            let next_index = (prev_index as i32 + link) as u32;
+            let Some(next_index) = prev_index.checked_add_signed(link) else {
+                panic!("integer overflow")
+            };
             if next_index == main_index {
                 break;
             }

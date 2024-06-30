@@ -1,33 +1,17 @@
 #![allow(clippy::use_self)]
 
 use serde::{
-    Deserialize, Serialize
+    Serialize,
+    Deserialize,
 };
 
 use crate::{
     load::error::Error as LoadError,
-    value::{self as v, Key, TableIntoError as TableError, LimitedVec},
+    value::{self as v, Key, TableIntoError as TableError},
     table::ilog2_ceil,
-    operand::{Operand, Jump},
+    serde::option_some as serde_option_some,
+    instruction::Instruction,
 };
-
-mod serde_option_some {
-    use serde::{
-        Serialize, Serializer,
-        Deserialize, Deserializer,
-    };
-
-    pub(super) fn serialize<T, S>(value: &Option<T>, ser: S)
-    -> Result<S::Ok, S::Error>
-    where T: Serialize, S: Serializer {
-        value.as_ref().unwrap().serialize(ser)
-    }
-    pub(super) fn deserialize<'de, T, D>(de: D)
-    -> Result<Option<T>, D::Error>
-    where  T: Deserialize<'de>, D: Deserializer<'de> {
-        Ok(Some(T::deserialize(de)?))
-    }
-}
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Behavior {
@@ -237,7 +221,7 @@ impl BehaviorBuilder {
 
 impl From<Behavior> for v::Value {
     fn from(this: Behavior) -> v::Value {
-        let mut table = v::Table::dump_builder(
+        let mut table = v::TableDumpBuilder::new(
             Some( this.instructions.len().try_into()
                 .expect("length should fit") ),
             ilog2_ceil(
@@ -247,29 +231,29 @@ impl From<Behavior> for v::Value {
                 usize::from(!this.subroutines.is_empty())
             ),
         );
-        table.extend( this.instructions.into_iter()
+        table.array_extend( this.instructions.into_iter()
             .map(v::Value::from).map(Some) );
         if let Some(name) = this.name {
-            table.assoc_insert_name("name", Some(v::Value::String(name)));
+            table.assoc_insert("name", Some(v::Value::String(name)));
         }
         if let Some(description) = this.description {
-            table.assoc_insert_name( "desc",
+            table.assoc_insert( "desc",
                 Some(v::Value::String(description)) );
         }
         if !this.parameters.is_empty() {
-            table.assoc_insert_name("parameters", Some(
+            table.assoc_insert("parameters", Some(
                 this.parameters.iter()
                     .map(|param| Some(v::Value::Boolean(param.is_output)))
                     .collect::<v::Value>()
             ));
-            table.assoc_insert_name("pnames", Some(
+            table.assoc_insert("pnames", Some(
                 this.parameters.into_iter()
                     .map(|param| param.name.map(v::Value::String))
                     .collect::<v::Value>()
             ));
         }
         if !this.subroutines.is_empty() {
-            table.assoc_insert_name("subs", Some(
+            table.assoc_insert("subs", Some(
                 this.subroutines.into_iter()
                     .map(|sub| Some(v::Value::from(sub)))
                     .collect::<v::Value>()
@@ -279,262 +263,51 @@ impl From<Behavior> for v::Value {
     }
 }
 
-// subroutines can create instructions with an arbitrary number of parameters
-const INSTRUCTION_MAX_ARGS: usize = 256;
+#[cfg(test)]
+mod test {
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Instruction {
+use super::Behavior;
 
-    #[serde(rename="op")]
-    pub operation: String,
-
-    #[serde( default,
-        skip_serializing_if="Vec::is_empty" )]
-    pub args: Vec<Operand>,
-
-    pub next: Jump,
-
-    #[serde( default, rename="cmt",
-        skip_serializing_if="Option::is_none",
-        with="serde_option_some" )]
-    pub comment: Option<String>,
-
-    #[serde( default, rename="offset",
-        skip_serializing_if="Option::is_none",
-        with="serde_option_some" )]
-    pub repr_offset: Option<(f64, f64)>,
-
-    // uncommon parameters
-
-    #[serde( default, rename="c",
-        skip_serializing_if="Option::is_none",
-        with="serde_option_some" )]
-    pub variant: Option<i32>,
-
-    #[serde( default, rename="txt",
-        skip_serializing_if="Option::is_none",
-        with="serde_option_some" )]
-    pub text: Option<String>,
-
-    #[serde( default, rename="sub",
-        skip_serializing_if="Option::is_none",
-        with="serde_option_some" )]
-    pub subroutine: Option<i32>,
-
-    // XXX there may be other uncommon parameters;
-    // perhaps it is wise to unite them in a vector or a map
-
+#[test]
+fn test_map_1() {
+    let s = r#"Behavior(
+        name: "Behavior Name",
+        instructions: [],
+    )"#;
+    // eprintln!("{s:?}");
+    let _: Behavior = ron::from_str(s).unwrap();
 }
 
-impl TryFrom<v::Value> for Instruction {
-    type Error = LoadError;
-    fn try_from(value: v::Value) -> Result<Instruction, Self::Error> {
-        let v::Value::Table(table) = value else {
-            return Err(LoadError::from(
-                "instruction should be represented by a table value" ));
-        };
-        Instruction::try_from(table)
-    }
+#[test]
+fn test_map_2() {
+    // XXX this is not actually a valid blueprint
+    // (removed parameters in the subroutine)
+    let s = r#"
+    Behavior(
+    name: "Test Behavior",
+    parameters:
+    [(is_output:false,),(is_output:true,),(is_output:true,),],
+    instructions: [
+    ( op: "remap_value", args: [ Index(1), Number(100), Number(200),
+    Number(1000), Number(3000), Index(2), ], next: Next, ),
+    ( op: "get_self", args: [ Variable("A"), ], next: Next, ),
+    ( op: "call", args: [ Variable("A"), Variable("B"), Unset, Unset,
+    Index(2), ], next: Next, sub: 1, ),
+    ( op: "lock", next: Next, ),
+    ( op: "set_reg", args: [ Variable("B"), Index(3), ], next: Next, ), ],
+    subroutines: [ ( name: "Test Subroutine",
+    parameters: [ ( is_output: false ), ( is_output: true )],
+    instructions: [
+    ( op: "unlock", next: Next, ),
+    ( op: "check_grid_effeciency", args: [ Index(4), Index(1), ], next:
+    Next, ),
+    ( op: "set_reg", args: [ Number(1), Index(2), ], next: Return, ),
+    ( op: "set_reg", args: [ Number(2), Index(2), ], next: Next, ),
+    ],),],)
+    "#;
+    // eprintln!("{s:?}");
+    let _: Behavior = ron::from_str(s).unwrap();
 }
 
-impl TryFrom<v::Table> for Instruction {
-    type Error = LoadError;
-    fn try_from(table: v::Table) -> Result<Instruction, Self::Error> {
-        InstructionBuilder::build_from(table)
-    }
-}
-
-#[derive(Default)]
-struct InstructionBuilder {
-    operation: Option<String>,
-    args: Vec<Option<Operand>>,
-    next: Option<Jump>,
-    comment: Option<String>,
-    repr_offset_x: Option<f64>,
-    repr_offset_y: Option<f64>,
-
-    // uncommon parameters (`c`, `txt`, `sub`)
-    variant: Option<i32>,
-    text: Option<String>,
-    subroutine: Option<i32>,
-}
-
-impl InstructionBuilder {
-
-    fn build_from(table: v::Table) -> Result<Instruction, LoadError> {
-        const MAX_ARGS: usize = INSTRUCTION_MAX_ARGS;
-        let mut this = Self::default();
-        let array: LimitedVec<MAX_ARGS, _> = table.try_into_seq_and_named(
-            |name, value| match name.as_str() {
-                "op"  => this.set_operation (value),
-                "next"=> this.set_next      (value),
-                "cmt" => this.set_comment   (value),
-                "nx"  => this.set_offset_x(value),
-                "ny"  => this.set_offset_y(value),
-                "c"   => this.set_variant   (value),
-                "txt" => this.set_text      (value),
-                "sub" => this.set_subroutine(value),
-                _ => Err(Self::err_unexpected_key(Key::Name(name))),
-            },
-            Self::err_from_table_index )?;
-        let array = array.get();
-        this.args.resize_with(array.len(), || None);
-        for (index, value) in array.into_iter().enumerate() {
-            let Some(value) = value else { continue };
-            this.args[index] = Some(Operand::try_from(value)?);
-        }
-        this.finish()
-    }
-
-    fn err_from_table_index(error: TableError) -> LoadError {
-        match error {
-            TableError::NonContinuous(index) =>
-                Self::err_non_continuous(index),
-            TableError::UnexpectedKey(key) =>
-                Self::err_unexpected_key(key),
-        }
-    }
-
-    fn err_non_continuous(index: i32) -> LoadError { LoadError::from(format!(
-        "behavior representation should have \
-         instruction indices in a continuous range `1..n`: {index:?}" )) }
-
-    fn err_unexpected_key(key: Key) -> LoadError { LoadError::from(format!(
-        "behavior representation should not have {key:?} key" )) }
-
-    fn set_operation(&mut self, value: v::Value) -> Result<(), LoadError> {
-        let v::Value::String(value) = value else {
-            return Err(LoadError::from(
-                "instruction's operation should be a string" ));
-        };
-        self.operation = Some(value); Ok(())
-    }
-
-    fn set_variant(&mut self, value: v::Value) -> Result<(), LoadError> {
-        let v::Value::Integer(value) = value else {
-            return Err(LoadError::from(
-                "instruction's variant should be an integer" ));
-        };
-        self.variant = Some(value); Ok(())
-    }
-
-    fn set_next(&mut self, value: v::Value) -> Result<(), LoadError> {
-        self.next = Some(Jump::try_from(Some(value))?); Ok(())
-    }
-
-    fn set_comment(&mut self, value: v::Value) -> Result<(), LoadError> {
-        let v::Value::String(value) = value else {
-            return Err(LoadError::from(
-                "instruction's comment should be a string" ));
-        };
-        self.comment = Some(value); Ok(())
-    }
-
-    fn set_text(&mut self, value: v::Value) -> Result<(), LoadError> {
-        let v::Value::String(value) = value else {
-            return Err(LoadError::from(
-                "instruction's text should be a string" ));
-        };
-        self.text = Some(value); Ok(())
-    }
-
-    fn set_subroutine(&mut self, value: v::Value) -> Result<(), LoadError> {
-        let v::Value::Integer(value) = value else {
-            return Err(LoadError::from(
-                "instruction's subroutine index should be an integer" ));
-        };
-        self.subroutine = Some(value); Ok(())
-    }
-
-    fn set_float(field: &mut Option<f64>, value: v::Value)
-    -> Result<(), LoadError> {
-        let v::Value::Float(value) = value else {
-            return Err(LoadError::from(
-                "instruction's offset should be a float" ));
-        };
-        *field = Some(value); Ok(())
-    }
-
-    fn set_offset_x(&mut self, value: v::Value) -> Result<(), LoadError> {
-        Self::set_float(&mut self.repr_offset_x, value)
-    }
-
-    fn set_offset_y(&mut self, value: v::Value) -> Result<(), LoadError> {
-        Self::set_float(&mut self.repr_offset_y, value)
-    }
-
-    fn finish(self) -> Result<Instruction, LoadError> {
-        let Self {
-            operation, args, next,
-            comment,
-            repr_offset_x, repr_offset_y,
-            variant, text, subroutine,
-        } = self;
-        let args = args.into_iter()
-            .map(Operand::unwrap_option)
-            .collect();
-        let next = Jump::unwrap_option(next);
-        let Some(operation) = operation else {
-            return Err(LoadError::from(
-                "Operation must be represented with a non-nil `op` field" ));
-        };
-        let repr_offset = match (repr_offset_x, repr_offset_y) {
-            (Some(x), Some(y)) => Some((x, y)),
-            (None, None) => None,
-            _ => return Err(LoadError::from(
-                "Offset coordinates (`nx` and `ny` fields) should either \
-                both be present or both not." )),
-        };
-        Ok(Instruction {
-            operation, args, next,
-            comment,
-            repr_offset,
-            variant, text, subroutine,
-        })
-    }
-}
-
-impl From<Instruction> for v::Value {
-    fn from(this: Instruction) -> v::Value {
-        let mut table = v::Table::dump_builder(
-            Some( this.args.len().try_into()
-                .expect("length should fit") ),
-            ilog2_ceil(
-                1 + // operation
-                1 + // next
-                usize::from(this.comment.is_some()) +
-                2 * usize::from(this.repr_offset.is_some()) +
-                usize::from(this.variant.is_some()) +
-                usize::from(this.text.is_some()) +
-                usize::from(this.subroutine.is_some())
-            ),
-        );
-        table.extend( this.args.into_iter()
-            .map(Option::<v::Value>::from) );
-        table.assoc_insert_name("op", Some(v::Value::String(this.operation)));
-        if let Some(next_value) = this.next.into() {
-            table.assoc_insert_name("next", Some(next_value));
-        } else {
-            table.assoc_insert_dead_name("next");
-        }
-        if let Some(comment) = this.comment {
-            table.assoc_insert_name("cmt", Some(v::Value::String(comment)));
-        }
-        if let Some((x, y)) = this.repr_offset {
-            table.assoc_insert_name("nx", Some(v::Value::Float(x)));
-            table.assoc_insert_name("ny", Some(v::Value::Float(y)));
-        }
-        if let Some(variant) = this.variant {
-            table.assoc_insert_name("c", Some(v::Value::Integer(variant)));
-        }
-        if let Some(text) = this.text {
-            table.assoc_insert_name("txt", Some(v::Value::String(text)));
-        }
-        if let Some(subroutine) = this.subroutine {
-            table.assoc_insert_name( "sub",
-                Some(v::Value::Integer(subroutine)) );
-        }
-        v::Value::Table(table.finish())
-    }
 }
 

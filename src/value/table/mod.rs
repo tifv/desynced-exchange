@@ -55,17 +55,6 @@ where V: std::fmt::Debug,
 impl<V> Table<V> {
 
     #[must_use]
-    pub fn map_builder() -> TableMapBuilder<V> {
-        TableMapBuilder::new()
-    }
-
-    #[must_use]
-    pub fn dump_builder(array_len: Option<u32>, assoc_loglen: Option<u16>)
-    -> TableDumpBuilder<V> {
-        TableDumpBuilder::new(array_len, assoc_loglen)
-    }
-
-    #[must_use]
     pub fn dump_iter(&self) -> TableDumpIter<'_, V>
     {
         TableDumpIter {
@@ -95,7 +84,30 @@ impl<V> Table<V> {
 
 }
 
-pub(super) struct TableLoadBuilder<V> {
+pub struct TableArrayBuilder<V> {
+    array: Vec<Option<V>>,
+}
+
+impl<V> TableArrayBuilder<V> {
+
+    pub fn new() -> Self {
+        Self { array: Vec::new() }
+    }
+
+    pub fn finish(self) -> Table<V> {
+        let Self { array } = self;
+        Table { array, assoc: AssocTable::new(None) }
+    }
+
+}
+
+impl<V> FromIterator<Option<V>> for TableArrayBuilder<V> {
+    fn from_iter<T: IntoIterator<Item = Option<V>>>(iter: T) -> Self {
+        Self { array: Vec::from_iter(iter) }
+    }
+}
+
+pub(crate) struct TableLoadBuilder<V> {
     array: Vec<Option<V>>,
     assoc: AssocTableLoadBuilder<V>,
 }
@@ -103,7 +115,7 @@ pub(super) struct TableLoadBuilder<V> {
 impl<V> TableLoadBuilder<V> {
 
     #[must_use]
-    pub(super) fn new(array_len: u32, assoc_loglen: Option<u16>) -> Self {
+    pub(crate) fn new(array_len: u32, assoc_loglen: Option<u16>) -> Self {
         let mut array = Vec::with_capacity(u32_to_usize(array_len));
         array.resize_with(u32_to_usize(array_len), || None);
         Self {
@@ -112,13 +124,13 @@ impl<V> TableLoadBuilder<V> {
         }
     }
 
-    pub(super) fn finish<E: load::Error>(self) -> Result<Table<V>, E> {
+    pub(crate) fn finish<E: load::Error>(self) -> Result<Table<V>, E> {
         let Self { array, assoc } = self;
         let assoc = assoc.finish::<E>()?;
         Ok(Table { array, assoc })
     }
 
-    pub(super) fn array_insert<E: load::Error>( &mut self,
+    pub(crate) fn array_insert<E: load::Error>( &mut self,
         index: u32, value: V,
     ) -> Result<(), E> {
         //! `index` is 0-based
@@ -129,7 +141,7 @@ impl<V> TableLoadBuilder<V> {
         Ok(())
     }
 
-    pub(super) fn assoc_insert<E: load::Error>( &mut self,
+    pub(crate) fn assoc_insert<E: load::Error>( &mut self,
         index: u32, item: AssocItem<V>,
     ) -> Result<(), E> {
         //! `index` is 0-based
@@ -144,7 +156,7 @@ impl<V> TableLoadBuilder<V> {
         Ok(())
     }
 
-    pub(super) fn set_last_free(&mut self, last_free: u32) {
+    pub(crate) fn set_last_free(&mut self, last_free: u32) {
         self.assoc.set_last_free(last_free)
     }
 
@@ -158,7 +170,7 @@ pub struct TableDumpBuilder<V> {
 impl<V> TableDumpBuilder<V> {
 
     #[must_use]
-    fn new(
+    pub fn new(
         array_len: Option<u32>,
         assoc_loglen: Option<u16>,
     ) -> Self {
@@ -181,37 +193,20 @@ impl<V> TableDumpBuilder<V> {
         self.array.push(value);
     }
 
-    pub fn assoc_insert(&mut self, key: Key, value: Option<V>) {
-        self.assoc.insert(key, value)
-    }
-
-    pub fn assoc_insert_name(&mut self, key: &'static str, value: Option<V>) {
-        self.assoc_insert(Key::from(key), value)
-    }
-
-    pub fn assoc_insert_dead(&mut self, key: Key) {
-        self.assoc.insert_dead(key)
-    }
-
-    pub fn assoc_insert_dead_name(&mut self, key: &'static str) {
-        self.assoc_insert_dead(Key::from(key))
-    }
-
-}
-
-impl<V> Extend<Option<V>> for TableDumpBuilder<V> {
-    fn extend<T: IntoIterator<Item=Option<V>>>(&mut self, iter: T) {
+    pub fn array_extend<I>(&mut self, iter: I)
+    where I: IntoIterator<Item=Option<V>>
+    {
         self.array.extend(iter)
     }
-}
 
-impl<V> FromIterator<Option<V>> for Table<V> {
-    fn from_iter<T: IntoIterator<Item=Option<V>>>(iter: T) -> Self {
-        Self {
-            array: Vec::from_iter(iter),
-            assoc: AssocTable::new(None),
-        }
+    pub fn assoc_insert<K: Into<Key>>(&mut self, key: K, value: Option<V>) {
+        self.assoc.insert(key.into(), value)
     }
+
+    pub fn assoc_insert_dead<K: Into<Key>>(&mut self, key: K) {
+        self.assoc.insert_dead(key.into())
+    }
+
 }
 
 pub struct TableMapBuilder<V> {
@@ -256,18 +251,18 @@ impl<V> TableMapBuilder<V> {
             let value = array.pop().unwrap();
             array_len -= 1;
             values.insert(Key::Index(index), value);
-            while array.last().is_some_and(Option::is_none) {
+            while matches!(array.last(), Some(None)) {
                 array.pop();
             }
         }
-        let mut table = Table::dump_builder(
+        let mut table = TableDumpBuilder::new(
             Some(array.len().try_into().unwrap()),
             ilog2_ceil(
                 usize::checked_add(values.len(), dead_keys.len())
                     .unwrap()
             ),
         );
-        table.extend(array);
+        table.array_extend(array);
         for (key, value) in values {
             table.assoc_insert(key, value);
         }
@@ -277,21 +272,13 @@ impl<V> TableMapBuilder<V> {
         table.finish()
     }
 
-    pub fn insert(&mut self, key: Key, value: Option<V>) {
-        let old_value = self.values.insert(key, value);
+    pub fn insert<K: Into<Key>>(&mut self, key: K, value: Option<V>) {
+        let old_value = self.values.insert(key.into(), value);
         assert!(old_value.is_none());
     }
 
-    pub fn insert_name(&mut self, key: &'static str, value: Option<V>) {
-        self.insert(Key::from(key), value)
-    }
-
-    pub fn insert_assoc_dead(&mut self, key: Key) {
-        self.dead_keys.push(key);
-    }
-
-    pub fn insert_assoc_dead_name(&mut self, key: &'static str) {
-        self.insert_assoc_dead(Key::from(key))
+    pub fn insert_assoc_dead<K: Into<Key>>(&mut self, key: K) {
+        self.dead_keys.push(key.into());
     }
 
 }

@@ -68,6 +68,12 @@ impl From<&str> for KeyOwned {
     }
 }
 
+impl From<String> for KeyOwned {
+    fn from(value: String) -> Self {
+        Self::Name(value)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 #[allow(clippy::exhaustive_enums)]
 pub enum TableItem<K, V> {

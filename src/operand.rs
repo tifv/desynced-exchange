@@ -3,7 +3,8 @@
 use std::marker::PhantomData;
 
 use serde::{
-    Deserialize, Serialize,
+    Serialize,
+    Deserialize,
 };
 
 use crate::{
@@ -474,30 +475,30 @@ impl From<Value> for v::Value {
     fn from(this: Value) -> v::Value {
         match this {
             Value::Number(number) => {
-                let mut table = v::Table::dump_builder(Some(0), Some(0));
-                table.assoc_insert_name("num", Some(v::Value::Integer(number)));
+                let mut table = v::TableDumpBuilder::new(Some(0), Some(0));
+                table.assoc_insert("num", Some(v::Value::Integer(number)));
                 v::Value::Table(table.finish())
             },
             Value::Coord(coord) | Value::CoordCount(coord, 0) => {
-                let mut table = v::Table::dump_builder(Some(0), Some(0));
-                table.assoc_insert_name("coord", Some(v::Value::from(coord)));
+                let mut table = v::TableDumpBuilder::new(Some(0), Some(0));
+                table.assoc_insert("coord", Some(v::Value::from(coord)));
                 v::Value::Table(table.finish())
             },
             Value::CoordCount(coord, num) => {
-                let mut table = v::Table::dump_builder(Some(0), Some(1));
-                table.assoc_insert_name("coord", Some(v::Value::from(coord)));
-                table.assoc_insert_name("num", Some(v::Value::Integer(num)));
+                let mut table = v::TableDumpBuilder::new(Some(0), Some(1));
+                table.assoc_insert("coord", Some(v::Value::from(coord)));
+                table.assoc_insert("num", Some(v::Value::Integer(num)));
                 v::Value::Table(table.finish())
             },
             Value::Item(id) | Value::ItemCount(id, 0) => {
-                let mut table = v::Table::dump_builder(Some(0), Some(0));
-                table.assoc_insert_name("id", Some(v::Value::String(id)));
+                let mut table = v::TableDumpBuilder::new(Some(0), Some(0));
+                table.assoc_insert("id", Some(v::Value::String(id)));
                 v::Value::Table(table.finish())
             },
             Value::ItemCount(id, num) => {
-                let mut table = v::Table::dump_builder(Some(0), Some(1));
-                table.assoc_insert_name("id", Some(v::Value::String(id)));
-                table.assoc_insert_name("num", Some(v::Value::Integer(num)));
+                let mut table = v::TableDumpBuilder::new(Some(0), Some(1));
+                table.assoc_insert("id", Some(v::Value::String(id)));
+                table.assoc_insert("num", Some(v::Value::Integer(num)));
                 v::Value::Table(table.finish())
             },
         }
@@ -558,9 +559,9 @@ impl TryFrom<v::Table> for Coord {
 
 impl From<Coord> for v::Value {
     fn from(this: Coord) -> v::Value {
-        let mut table = v::Table::dump_builder(Some(0), Some(1));
-        table.assoc_insert(Key::from("x"), Some(v::Value::Integer(this.x)));
-        table.assoc_insert(Key::from("y"), Some(v::Value::Integer(this.y)));
+        let mut table = v::TableDumpBuilder::new(Some(0), Some(1));
+        table.assoc_insert("x", Some(v::Value::Integer(this.x)));
+        table.assoc_insert("y", Some(v::Value::Integer(this.y)));
         v::Value::Table(table.finish())
     }
 }

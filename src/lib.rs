@@ -246,10 +246,13 @@
 // #![warn(clippy::exhaustive_enums)]
 // #![warn(clippy::exhaustive_structs)]
 
-use serde::{Serialize, Deserialize};
+use ::serde::{Serialize, Deserialize};
 
 mod ascii;
 mod intlim;
+
+#[macro_use]
+mod serde;
 
 pub mod table;
 pub mod load;
@@ -257,8 +260,9 @@ pub mod dump;
 
 pub mod value;
 
-pub mod behavior;
 pub mod blueprint;
+pub mod behavior;
+pub mod instruction;
 pub mod operand;
 
 mod test;

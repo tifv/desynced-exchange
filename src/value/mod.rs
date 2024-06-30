@@ -8,7 +8,11 @@ use crate::{
     table::{TableItem, iexp2},
 };
 
-use self::table::TableLoadBuilder;
+pub(crate) use self::table::{
+    TableArrayBuilder,
+    TableLoadBuilder,
+    TableDumpBuilder,
+};
 
 #[derive(Clone)]
 pub enum Value {
@@ -162,7 +166,7 @@ impl FromIterator<Option<Value>> for Value {
     #![allow(clippy::use_self)]
     fn from_iter<T: IntoIterator<Item=Option<Value>>>(iter: T) -> Self {
         //! Create an array-only table from an iterable of values
-        Self::Table(Table::from_iter(iter))
+        Self::Table(TableArrayBuilder::from_iter(iter).finish())
     }
 }
 
