@@ -161,6 +161,7 @@ impl load::Builder for ValueBuilder {
 impl FromIterator<Option<Value>> for Value {
     #![allow(clippy::use_self)]
     fn from_iter<T: IntoIterator<Item=Option<Value>>>(iter: T) -> Self {
+        //! Create an array-only table from an iterable of values
         Self::Table(Table::from_iter(iter))
     }
 }
