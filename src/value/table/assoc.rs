@@ -223,7 +223,8 @@ impl<V> IntoIterator for Table<V> {
     type Item = Option<Item<V>>;
     type IntoIter = TableIntoIter<V>;
     fn into_iter(self) -> Self::IntoIter {
-        TableIntoIter { items: self.items.map(Vec::from).map(Vec::into_iter) }
+        let items = self.items.map(Vec::from).map(Vec::into_iter);
+        TableIntoIter { items }
     }
 }
 
@@ -233,6 +234,32 @@ pub(super) struct TableIntoIter<V> {
 
 impl<V> Iterator for TableIntoIter<V> {
     type Item = Option<Item<V>>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.items.as_mut().and_then(Iterator::next)
+    }
+}
+
+impl<'s, V> IntoIterator for &'s Table<V> {
+    type Item = &'s Option<Item<V>>;
+    type IntoIter = TableIter<'s, V>;
+    fn into_iter(self) -> Self::IntoIter {
+        let items = self.items.as_ref().map(Box::as_ref).map(<[_]>::iter);
+        TableIter { items }
+    }
+}
+
+impl<V> Table<V> {
+    pub fn iter(&'_ self) -> TableIter<'_, V> {
+        <&Self as IntoIterator>::into_iter(self)
+    }
+}
+
+pub(super) struct TableIter<'s, V> {
+    items: Option<std::slice::Iter<'s, Option<Item<V>>>>,
+}
+
+impl<'s, V> Iterator for TableIter<'s, V> {
+    type Item = &'s Option<Item<V>>;
     fn next(&mut self) -> Option<Self::Item> {
         self.items.as_mut().and_then(Iterator::next)
     }

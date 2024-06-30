@@ -1,3 +1,5 @@
+use serde::{Serialize, Deserialize};
+
 mod table;
 
 pub use table::{Key, TableIntoError, LimitedVec};
@@ -14,13 +16,14 @@ pub(crate) use self::table::{
     TableDumpBuilder,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum Value {
     Boolean(bool),
     Integer(i32),
     Float(f64),
     String(String),
-    Table(Table)
+    Table(Table),
 }
 
 pub type Table = table::Table<Value>;

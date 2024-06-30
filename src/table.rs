@@ -4,8 +4,11 @@
 
 use std::borrow::Borrow;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+use serde::{Serialize, Deserialize};
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(clippy::exhaustive_enums)]
+#[serde(untagged)]
 pub enum Key<I: Borrow<i32>, S: Borrow<str>> {
     Index(I),
     Name(S),

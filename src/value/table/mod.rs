@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 mod assoc;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
     table::{
         KeyRef,
@@ -283,6 +285,37 @@ impl<V> TableMapBuilder<V> {
 
 }
 
+impl<'de, V> serde::de::Visitor<'de> for TableMapBuilder<V>
+where V: Deserialize<'de>
+{
+    type Value = Table<V>;
+
+    fn expecting(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(fmt, "a map or an array")
+    }
+
+    fn visit_seq<A>(mut self, mut seq: A) -> Result<Self::Value, A::Error>
+    where A: serde::de::SeqAccess<'de>
+    {
+        let mut index = 1;
+        while let Some(value) = seq.next_element()? {
+            self.insert(Key::Index(index), value);
+            index += 1;
+        }
+        Ok(self.finish())
+    }
+
+    fn visit_map<A>(mut self, mut map: A) -> Result<Self::Value, A::Error>
+    where A: serde::de::MapAccess<'de>
+    {
+        while let Some((key, value)) = map.next_entry::<Key, _>()? {
+            self.insert(key, value);
+        }
+        Ok(self.finish())
+    }
+
+}
+
 pub struct TableDumpIter<'s, V> {
     array: Option<std::slice::Iter<'s, Option<V>>>,
     assoc: assoc::TableDumpIter<'s, V>,
@@ -360,6 +393,53 @@ impl<V> Iterator for TableIntoIter<V> {
             let Some(AssocItem::Live { value: Some(value), key, .. }) = item
                 else { continue };
             return Some((key, value));
+        }
+        None
+    }
+}
+
+impl<'s, V> IntoIterator for &'s Table<V> {
+    type Item = (KeyRef<'s>, &'s V);
+    type IntoIter = TableIter<'s, V>;
+    fn into_iter(self) -> Self::IntoIter {
+        TableIter {
+            array_iter: Some(self.array.iter().enumerate()),
+            assoc_iter: Some(self.assoc.iter()),
+        }
+    }
+}
+
+impl<V> Table<V> {
+    pub fn iter(&'_ self) -> TableIter<'_, V> {
+        <&Self as IntoIterator>::into_iter(self)
+    }
+}
+
+pub struct TableIter<'s, V> {
+    array_iter: Option<std::iter::Enumerate<
+        std::slice::Iter<'s, Option<V>> >>,
+    assoc_iter: Option<assoc::TableIter<'s, V>>,
+}
+
+impl<'s, V> Iterator for TableIter<'s, V> {
+    type Item = (KeyRef<'s>, &'s V);
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some((index, value)) =
+            self.array_iter.as_mut().and_then(Iterator::next)
+        {
+            let Some(value) = value else { continue };
+            let Some(index) = index
+                .checked_add(1)
+                .map(i32::try_from).and_then(Result::ok)
+                else { unreachable!() };
+            return Some((KeyRef::Index(index), value));
+        }
+        while let Some(item) =
+            self.assoc_iter.as_mut().and_then(Iterator::next)
+        {
+            let Some(AssocItem::Live { value: Some(value), key, .. }) = item
+                else { continue };
+            return Some((key.as_ref(), value));
         }
         None
     }
@@ -549,6 +629,30 @@ impl<V> TryFrom<Table<V>> for Vec<V> {
             |name, _value| Err(TableIntoError::UnexpectedKey(Key::Name(name))),
             std::convert::identity,
         )
+    }
+}
+
+impl<V> Serialize for Table<V>
+where V: Serialize
+{
+    fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
+    where S: serde::Serializer
+    {
+        if self.assoc_loglen().is_none() {
+            ser.collect_seq(self.array.iter())
+        } else {
+            ser.collect_map(self.into_iter())
+        }
+    }
+}
+
+impl<'de, V> Deserialize<'de> for Table<V>
+where V: Deserialize<'de>
+{
+    fn deserialize<D>(de: D) -> Result<Self, D::Error>
+    where D: serde::Deserializer<'de>
+    {
+        de.deserialize_map(TableMapBuilder::new())
     }
 }
 
