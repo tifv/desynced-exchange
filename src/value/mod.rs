@@ -162,14 +162,6 @@ impl load::Builder for ValueBuilder {
 
 }
 
-impl FromIterator<Option<Value>> for Value {
-    #![allow(clippy::use_self)]
-    fn from_iter<T: IntoIterator<Item=Option<Value>>>(iter: T) -> Self {
-        //! Create an array-only table from an iterable of values
-        Self::Table(TableArrayBuilder::from_iter(iter).finish())
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod test {
     type Value = super::Value;

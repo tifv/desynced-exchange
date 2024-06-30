@@ -241,23 +241,23 @@ impl From<Behavior> for v::Value {
                 Some(v::Value::String(description)) );
         }
         if !this.parameters.is_empty() {
-            table.assoc_insert("parameters", Some(
+            table.assoc_insert("parameters", Some(v::Value::Table(
                 this.parameters.iter()
                     .map(|param| Some(v::Value::Boolean(param.is_output)))
-                    .collect::<v::Value>()
-            ));
-            table.assoc_insert("pnames", Some(
+                    .collect::<v::TableArrayBuilder<_>>().finish()
+            )));
+            table.assoc_insert("pnames", Some(v::Value::Table(
                 this.parameters.into_iter()
                     .map(|param| param.name.map(v::Value::String))
-                    .collect::<v::Value>()
-            ));
+                    .collect::<v::TableArrayBuilder<_>>().finish()
+            )));
         }
         if !this.subroutines.is_empty() {
-            table.assoc_insert("subs", Some(
+            table.assoc_insert("subs", Some(v::Value::Table(
                 this.subroutines.into_iter()
                     .map(|sub| Some(v::Value::from(sub)))
-                    .collect::<v::Value>()
-            ));
+                    .collect::<v::TableArrayBuilder<_>>().finish()
+            )));
         }
         v::Value::Table(table.finish())
     }
