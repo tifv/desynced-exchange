@@ -27,7 +27,7 @@ impl Writer {
     #[inline]
     fn dangling() -> Self {
         let start = std::ptr::NonNull::dangling().as_ptr();
-        Self{start, cursor: start, end: start}
+        Self { start, cursor: start, end: start }
     }
 
     #[inline]
@@ -38,7 +38,7 @@ impl Writer {
             let cursor = start.add(vec.len());
             let end = start.add(vec.capacity());
             std::mem::forget(vec);
-            Self{start, cursor, end}
+            Self { start, cursor, end }
         }
     }
 
@@ -55,7 +55,7 @@ impl Writer {
     #[inline]
     pub fn into_vec(self) -> Vec<u8> {
         unsafe {
-            let Self{start, cursor, end} = self;
+            let Self { start, cursor, end } = self;
             std::mem::forget(self);
             let len = ptr_sub(cursor, start);
             let cap = ptr_sub(end, start);
@@ -123,17 +123,17 @@ impl AsciiWriter {
 
     #[inline]
     pub fn from_string(string: AsciiString) -> Self {
-        Self{inner: Writer::from_vec(string.into())}
+        Self { inner: Writer::from_vec(string.into()) }
     }
 
     #[inline]
     pub fn new() -> Self {
-        Self{inner: Writer::new()}
+        Self { inner: Writer::new() }
     }
 
     #[inline]
     pub fn with_capacity(len: usize) -> Self {
-        Self{inner: Writer::with_capacity(len)}
+        Self { inner: Writer::with_capacity(len) }
     }
 
     pub fn into_string(self) -> AsciiString {

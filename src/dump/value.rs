@@ -29,7 +29,7 @@ pub(super) struct Dumper {
 impl Dumper {
 
     pub(super) fn new() -> Self {
-        Self{output: Writer::new()}
+        Self { output: Writer::new() }
     }
 
     pub(super) fn finish(self) -> Vec<u8> {
@@ -240,7 +240,7 @@ where
     K: DumpKey, V: Dump,
 {
     fn new(dumper: &'v mut Dumper) -> Self {
-        Self{
+        Self {
             dumper,
             values: [(); SERIAL_LEN].map(|()| None),
             len: 0,
@@ -274,9 +274,9 @@ where
                     value.dump(&mut *self.dumper)?;
                     continue;
                 },
-                TableItem::Assoc(AssocItem::Dead{link}) =>
+                TableItem::Assoc(AssocItem::Dead { link }) =>
                     (None, None, link),
-                TableItem::Assoc(AssocItem::Live{key, value, link}) =>
+                TableItem::Assoc(AssocItem::Live { key, value, link }) =>
                     (Some(key), value, link),
             };
             if let Some(value) = value {

@@ -22,13 +22,13 @@ pub mod error {
 
     impl From<&str> for Error {
         fn from(reason: &str) -> Self {
-            Self{reason: String::from(reason)}
+            Self { reason: String::from(reason) }
         }
     }
 
     impl From<String> for Error {
         fn from(reason: String) -> Self {
-            Self{reason}
+            Self { reason }
         }
     }
 

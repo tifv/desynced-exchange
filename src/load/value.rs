@@ -49,7 +49,7 @@ struct TableHeader {
 
 impl TableHeader {
     fn array(array_len: u32) -> Self {
-        Self{
+        Self {
             array_len,
             assoc_loglen: None,
             assoc_last_free: 0,
@@ -65,7 +65,7 @@ impl<'data> Loader<'data> {
         let max_array_len = u32::try_from(reader.len())
             .unwrap_or(u32::MAX)
             .saturating_mul(8);
-        Self{
+        Self {
             reader,
             max_array_len,
         }
@@ -170,10 +170,10 @@ impl<'data> Loader<'data> {
                     }
                     (last_free_code >> 1) as u32
                 };
-                TableHeader{
+                TableHeader {
                     array_len,
                     assoc_loglen,
-                    assoc_last_free
+                    assoc_last_free,
                 }
             },
             head @ 0x90 ..= 0x9F =>
@@ -213,7 +213,7 @@ impl<'data> LL for &mut Loader<'data> {
                 builder.build_string(self.load_string(head)?)
             },
             0x80 ..= 0x8F | 0x90 ..= 0x9F | 0xDC => {
-                let TableHeader{array_len, assoc_loglen, assoc_last_free} =
+                let TableHeader { array_len, assoc_loglen, assoc_last_free } =
                     self.load_table_header(head)?;
                 if assoc_loglen.is_some_and(|x| x > crate::MAX_ASSOC_LOGLEN) {
                     return Err(Error::from(
@@ -274,7 +274,7 @@ where K: LoadKey, V: Load,
         array_len: u32,
         assoc_loglen: Option<u16>, assoc_last_free: u32,
     ) -> Self {
-        Self{
+        Self {
             loader,
             array_len,
             assoc_loglen, assoc_last_free,
@@ -316,13 +316,13 @@ where K: LoadKey, V: Load,
             link = -link;
         }
         if let Some(key) = key {
-            Ok(Some(TableItem::Assoc(AssocItem::Live{value, key, link})))
+            Ok(Some(TableItem::Assoc(AssocItem::Live { value, key, link })))
         } else {
             if value.is_some() {
                 return Err(Error::from(
                     "empty key should correspond to nil value" ))
             }
-            Ok(Some(TableItem::Assoc(AssocItem::Dead{link})))
+            Ok(Some(TableItem::Assoc(AssocItem::Dead { link })))
         }
     }
 }

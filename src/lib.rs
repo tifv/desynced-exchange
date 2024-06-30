@@ -259,6 +259,7 @@ pub mod value;
 
 pub mod behavior;
 pub mod blueprint;
+pub mod operand;
 
 mod test;
 

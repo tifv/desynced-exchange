@@ -29,7 +29,7 @@ pub mod error {
 
     impl From<String> for Error {
         fn from(reason: String) -> Self {
-            Self{reason}
+            Self { reason }
         }
     }
 

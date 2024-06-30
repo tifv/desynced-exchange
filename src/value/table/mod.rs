@@ -68,7 +68,7 @@ impl<V> Table<V> {
     #[must_use]
     pub fn dump_iter(&self) -> TableDumpIter<'_, V>
     {
-        TableDumpIter{
+        TableDumpIter {
             array: Some(self.array.iter()),
             assoc: self.assoc.dump_iter(),
         }
@@ -113,9 +113,9 @@ impl<V> TableLoadBuilder<V> {
     }
 
     pub(super) fn finish<E: load::Error>(self) -> Result<Table<V>, E> {
-        let Self{array, assoc} = self;
+        let Self { array, assoc } = self;
         let assoc = assoc.finish::<E>()?;
-        Ok(Table{array, assoc})
+        Ok(Table { array, assoc })
     }
 
     pub(super) fn array_insert<E: load::Error>( &mut self,
@@ -134,11 +134,11 @@ impl<V> TableLoadBuilder<V> {
     ) -> Result<(), E> {
         //! `index` is 0-based
         match &item {
-            &AssocItem::Live{key: Key::Index(key), ..}
+            &AssocItem::Live { key: Key::Index(key), .. }
                 if key > 0 && (key as u32) <= (self.array.len() as u32)
-            => return Err(E::from(
-                "this assoc item should belong to array part" )),
-            _ => ()
+                => return Err(E::from(
+                    "this assoc item should belong to array part" )),
+            _ => (),
         }
         self.assoc.insert(index, item);
         Ok(())
@@ -162,7 +162,7 @@ impl<V> TableDumpBuilder<V> {
         array_len: Option<u32>,
         assoc_loglen: Option<u16>,
     ) -> Self {
-        Self{
+        Self {
             array: match array_len {
                 Some(len) => Vec::with_capacity(u32_to_usize(len)),
                 None => Vec::new(),
@@ -173,7 +173,7 @@ impl<V> TableDumpBuilder<V> {
 
     #[must_use]
     pub fn finish(self) -> Table<V> {
-        let Self{array, assoc} = self;
+        let Self { array, assoc } = self;
         Table { array, assoc: assoc.finish() }
     }
 
@@ -207,7 +207,7 @@ impl<V> Extend<Option<V>> for TableDumpBuilder<V> {
 
 impl<V> FromIterator<Option<V>> for Table<V> {
     fn from_iter<T: IntoIterator<Item=Option<V>>>(iter: T) -> Self {
-        Self{
+        Self {
             array: Vec::from_iter(iter),
             assoc: AssocTable::new(None),
         }
@@ -223,7 +223,7 @@ impl<V> TableMapBuilder<V> {
 
     #[must_use]
     fn new() -> Self {
-        Self{
+        Self {
             values: HashMap::new(),
             dead_keys: Vec::new(),
         }
@@ -231,7 +231,7 @@ impl<V> TableMapBuilder<V> {
 
     #[must_use]
     pub fn finish(self) -> Table<V> {
-        let Self{mut values, dead_keys} = self;
+        let Self { mut values, dead_keys } = self;
         let mut array = Vec::new();
         let max_len = i32::try_from(values.len())
             .unwrap_or(i32::MAX).saturating_mul(2);
@@ -341,7 +341,7 @@ impl<V> IntoIterator for Table<V> {
     type Item = (Key, V);
     type IntoIter = TableIntoIter<V>;
     fn into_iter(self) -> Self::IntoIter {
-        TableIntoIter{
+        TableIntoIter {
             array_iter: Some(self.array.into_iter().enumerate()),
             assoc_iter: Some(self.assoc.into_iter()),
         }
@@ -370,7 +370,7 @@ impl<V> Iterator for TableIntoIter<V> {
         while let Some(item) =
             self.assoc_iter.as_mut().and_then(Iterator::next)
         {
-            let Some(AssocItem::Live{value: Some(value), key, ..}) = item
+            let Some(AssocItem::Live { value: Some(value), key, .. }) = item
                 else { continue };
             return Some((key, value));
         }
@@ -396,7 +396,7 @@ pub struct MaybeVec<V> {
 impl<V> MaybeSequence<V> for MaybeVec<V> {
 
     fn new(table_len: u32) -> Self {
-        Self{max_index: table_len, vec: Vec::new()}
+        Self { max_index: table_len, vec: Vec::new() }
     }
 
     fn insert(&mut self, index: i32, value: V) -> Result<(), TableIntoError> {
@@ -482,7 +482,7 @@ impl<const N: usize, V> LimitedVec<N, V> {
 
 impl<const N: usize, V> MaybeSequence<V> for LimitedVec<N, V> {
     fn new(_table_len: u32) -> Self {
-        Self{vec: Vec::new()}
+        Self { vec: Vec::new() }
     }
 
     fn insert(&mut self, index: i32, value: V) -> Result<(), TableIntoError> {

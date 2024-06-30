@@ -75,52 +75,31 @@ pub enum TableItem<K, V> {
     Assoc(AssocItem<K, V>),
 }
 
-impl<K, V> TableItem<K, V> {
-    #[inline]
-    pub fn as_ref(&self) -> TableItem<&K, &V> {
-        match *self {
-            Self::Array(ref value) => TableItem::Array(value),
-            Self::Assoc(ref item) => TableItem::Assoc(item.as_ref()),
-        }
-    }
-    #[inline]
-    pub fn map_key_value<K1, V1, KF, VF>(self, keyf: KF, valuef: VF)
-        -> TableItem<K1, V1>
-    where KF: FnOnce(K) -> K1, VF: FnOnce(V) -> V1
-    {
-        match self {
-            Self::Array(value) => TableItem::Array(valuef(value)),
-            Self::Assoc(item) =>
-                TableItem::Assoc(item.map_key_value(keyf, valuef)),
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 #[allow(clippy::exhaustive_enums)]
 pub enum AssocItem<K, V> {
-    Dead{link: i32},
-    Live{value: Option<V>, key: K, link: i32},
+    Dead { link: i32 },
+    Live { value: Option<V>, key: K, link: i32 },
 }
 
 impl<K, V> AssocItem<K, V> {
     #[inline]
-    pub fn as_ref(&self) -> AssocItem<&K, &V> {
+    pub(crate) fn as_ref(&self) -> AssocItem<&K, &V> {
         match *self {
-            Self::Dead{link} => AssocItem::Dead{link},
-            Self::Live{ref value, ref key, link} =>
-                AssocItem::Live{value: value.as_ref(), key, link},
+            Self::Dead { link } => AssocItem::Dead { link },
+            Self::Live { ref value, ref key, link } =>
+                AssocItem::Live { value: value.as_ref(), key, link },
         }
     }
     #[inline]
-    pub fn map_key_value<K1, V1, KF, VF>(self, keyf: KF, valuef: VF)
+    pub(crate) fn map_key_value<K1, V1, KF, VF>(self, keyf: KF, valuef: VF)
         -> AssocItem<K1, V1>
     where KF: FnOnce(K) -> K1, VF: FnOnce(V) -> V1
     {
         match self {
-            Self::Dead{link} => AssocItem::Dead{link},
-            Self::Live{value, key, link} =>
-                AssocItem::Live{value: value.map(valuef), key: keyf(key), link},
+            Self::Dead { link } => AssocItem::Dead { link },
+            Self::Live { value, key, link } =>
+                AssocItem::Live { value: value.map(valuef), key: keyf(key), link },
         }
     }
 }
@@ -130,11 +109,11 @@ where K: std::fmt::Debug, V: std::fmt::Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let link = match self {
-            Self::Dead{link} => {
+            Self::Dead { link } => {
                 f.write_str("×")?;
                 *link
             },
-            Self::Live{value, key, link} => {
+            Self::Live { value, key, link } => {
                 key.fmt(f)?;
                 f.write_str(": ")?;
                 value.fmt(f)?;

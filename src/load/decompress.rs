@@ -103,7 +103,7 @@ struct Base62Decoder<'r> {
 
 impl<'r> Base62Decoder<'r> {
     fn new(reader: AsciiReader<'r>) -> Self {
-        Self{
+        Self {
             reader,
             checksum: std::num::Wrapping(0),
         }
@@ -116,7 +116,7 @@ impl<'r> Base62Decoder<'r> {
             dest.extend::<[u8; WORD_LEN]>(
                 self.emit_final_word()?.to_le_bytes() );
         }
-        let Self{checksum, ..} = self;
+        let Self { checksum, .. } = self;
         Ok(Int62::divrem(checksum.0).1)
     }
     fn emit_word(&mut self) -> Result<Option<u32>, Error> {

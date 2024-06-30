@@ -64,8 +64,8 @@ impl Key {
 impl<V> Item<V> {
     fn main_position(&self, loglen: u16) -> Option<u32> {
         match self {
-            Self::Dead{..} => None,
-            Self::Live{key, ..} => Some(key.position(loglen))
+            Self::Dead { .. } => None,
+            Self::Live { key, .. } => Some(key.position(loglen))
         }
     }
     fn relocate(mut self, old_index: u32, new_index: u32) -> Self {
@@ -130,7 +130,7 @@ impl<V> Table<V> {
         self.last_free
     }
     pub fn dump_iter(&self) -> TableDumpIter<'_, V> {
-        TableDumpIter{
+        TableDumpIter {
             items: self.items.as_ref().map_or_else(
                 Default::default,
                 |items| items.iter() ),
@@ -161,7 +161,7 @@ impl<V> Table<V> {
                     unvalidated[index] = None;
                 }
                 let link = match items[index] {
-                    Some(Item::Dead{link} | Item::Live{link, ..})
+                    Some(Item::Dead { link } | Item::Live { link, .. })
                         if link != 0
                         => link,
                     _ => break,
@@ -224,7 +224,7 @@ impl<V> IntoIterator for Table<V> {
     type Item = Option<Item<V>>;
     type IntoIter = TableIntoIter<V>;
     fn into_iter(self) -> Self::IntoIter {
-        TableIntoIter{items: self.items.map(Vec::from).map(Vec::into_iter)}
+        TableIntoIter { items: self.items.map(Vec::from).map(Vec::into_iter) }
     }
 }
 
@@ -246,7 +246,7 @@ pub(super) struct TableLoadBuilder<V> {
 impl<V> TableLoadBuilder<V> {
 
     pub(super) fn new(loglen: Option<u16>) -> Self {
-        Self{table: Table::new(loglen)}
+        Self { table: Table::new(loglen) }
     }
 
     pub(super) fn finish<E: load::Error>(self) -> Result<Table<V>, E> {
@@ -278,27 +278,27 @@ impl<V> TableLoadBuilder<V> {
 }
 
 enum InsertItem<V> {
-    Dead{position: u32},
-    Live{key: Key, value: Option<V>},
+    Dead { position: u32 },
+    Live { key: Key, value: Option<V> },
 }
 
 impl<V> InsertItem<V> {
     #[inline]
     fn dead_from_key(key: KeyRef<'_>, loglen: u16) -> Self {
-        Self::Dead{position: key.position(loglen)}
+        Self::Dead { position: key.position(loglen) }
     }
     #[inline]
     fn position(&self, loglen: u16) -> u32 {
         match *self {
-            Self::Dead{position} => position & mask(loglen),
-            Self::Live{ref key, ..} => key.position(loglen),
+            Self::Dead { position } => position & mask(loglen),
+            Self::Live { ref key, .. } => key.position(loglen),
         }
     }
     #[inline]
     fn into_item(self, link: i32) -> Item<V> {
         match self {
-            Self::Dead{..} => Item::Dead{link},
-            Self::Live{key, value} => Item::Live{value, key, link},
+            Self::Dead { .. } => Item::Dead { link },
+            Self::Live { key, value } => Item::Live { value, key, link },
         }
     }
 }
@@ -310,7 +310,7 @@ pub(super) struct TableDumpBuilder<V> {
 impl<V> TableDumpBuilder<V> {
 
     pub(super) fn new(loglen: Option<u16>) -> Self {
-        Self{table: Table::new(loglen)}
+        Self { table: Table::new(loglen) }
     }
 
     pub(super) fn finish(self) -> Table<V> {
@@ -318,7 +318,7 @@ impl<V> TableDumpBuilder<V> {
     }
 
     pub(super) fn insert(&mut self, key: Key, value: Option<V>) {
-        self.insert_item(InsertItem::Live{key, value})
+        self.insert_item(InsertItem::Live { key, value })
     }
 
     pub(super) fn insert_dead(&mut self, key: Key) {

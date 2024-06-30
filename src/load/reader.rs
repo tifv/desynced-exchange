@@ -27,14 +27,14 @@ impl<'data> Reader<'data> {
 
     #[inline]
     pub(super) fn from_slice(slice: &'data [u8]) -> Self {
-        let std::ops::Range{start, end} = slice.as_ptr_range();
-        Self{cursor: start, end, lifetime: PhantomData}
+        let std::ops::Range { start, end } = slice.as_ptr_range();
+        Self { cursor: start, end, lifetime: PhantomData }
     }
 
     #[inline]
     pub(super) fn into_slice(self) -> &'data [u8] {
         unsafe {
-            let Self{cursor: start, end, ..} = self;
+            let Self { cursor: start, end, .. } = self;
             let len = ptr_sub(end, start);
             std::slice::from_raw_parts(start, len)
         }
@@ -116,8 +116,9 @@ impl<'data> AsciiReader<'data> {
 
     #[inline]
     pub fn from_slice(slice: &'data [Ascii]) -> Self {
-        Self{reader: Reader::from_slice(
-            <&AsciiStr>::from(slice).into() )}
+        Self { reader: Reader::from_slice(
+            <&AsciiStr>::from(slice).into()
+        ) }
     }
 
     #[inline]

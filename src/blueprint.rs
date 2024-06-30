@@ -5,7 +5,8 @@ use crate::{
     load::error::Error as LoadError,
     dump::error::Error as DumpError,
     value as v,
-    behavior::{Behavior, Value},
+    operand::Value,
+    behavior::Behavior,
 };
 
 fn bool_true() -> bool { true }

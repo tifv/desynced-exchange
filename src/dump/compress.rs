@@ -74,7 +74,7 @@ struct Base62Encoder<'w> {
 
 impl<'w> Base62Encoder<'w> {
     fn new(writer: &'w mut AsciiWriter) -> Self {
-        Self{
+        Self {
             writer,
             buffer: [0; WORD_LEN],
             buffer_len: 0,
@@ -96,7 +96,7 @@ impl<'w> Base62Encoder<'w> {
         if self.buffer_len > 0 {
             self.consume_final_word();
         }
-        let Self{checksum, buffer_len: 0, ..} = self else {
+        let Self { checksum, buffer_len: 0, .. } = self else {
             unreachable!()
         };
         encode_base62(Int62::divrem(checksum.0).1)
