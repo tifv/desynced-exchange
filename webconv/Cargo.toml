@@ -1,4 +1,4 @@
-# compile with `wasm-pack build --target=web`
+# compile with `wasm-pack build --target=web --dev`
 
 [package]
 name = "desynced-exchange-web"
