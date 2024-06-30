@@ -13,15 +13,14 @@ const fn str_table_hash_with_seed<const SEED: u32>(value: &str) -> u32 {
     assert!(u32::BITS <= usize::BITS && index <= u32::MAX as usize);
     let mut hash = SEED ^ (index as u32);
     let step = (index >> 5) + 1;
-    let add = u32::wrapping_add;
     while index >= step {
         let j = match index.checked_sub(1) {
             Some(j) if j < value.len() => j,
             // SAFETY: i dare you
             _ => unsafe { std::hint::unreachable_unchecked() },
         };
-        hash ^= add(
-            add(hash << 5, hash >> 2),
+        hash ^= u32::wrapping_add(
+            u32::wrapping_add(hash << 5, hash >> 2),
             value[j] as u32 );
         index -= step;
     }
