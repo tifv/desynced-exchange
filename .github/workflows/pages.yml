@@ -25,7 +25,9 @@ jobs:
         mkdir ./build ./build/assets
     - name: Copy static files
       run: |
-        cp ./webconv/www/index.html ./build/index.html
+        find webconv/www/ -maxdepth 1 -type f \
+          '(' -name '*.html' -o -name '*.js' ')' \
+          -exec cp --verbose '{}' ./build ';'
     - name: Compile
       working-directory: ./webconv
       run: |
