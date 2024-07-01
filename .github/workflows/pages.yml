@@ -20,7 +20,7 @@ jobs:
       run: |
         cargo install wasm-pack
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Create build directory
       run: |
         mkdir ./build ./build/assets
@@ -45,7 +45,7 @@ jobs:
     #     unzip github-mark.zip github-mark/github-mark.svg &&
     #     mv ./github-mark/github-mark.svg -t ./build/assets/ || exit 0
     - name: Upload
-      uses: actions/upload-pages-artifact@v1
+      uses: actions/upload-pages-artifact@v3
       with:
         path: build
   deploy:
@@ -61,4 +61,4 @@ jobs:
     steps:
     - name: Deploy to GitHub Pages
       id: deployment
-      uses: actions/deploy-pages@v1
+      uses: actions/deploy-pages@v4
