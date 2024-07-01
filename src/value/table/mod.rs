@@ -639,9 +639,9 @@ where V: Serialize
     where S: serde::Serializer
     {
         if self.assoc_loglen().is_none() {
-            ser.collect_seq(self.array.iter())
+            ser.collect_seq(&self.array)
         } else {
-            ser.collect_map(self.into_iter())
+            ser.collect_map(self)
         }
     }
 }
