@@ -126,13 +126,13 @@ pub fn decode(encoded: &str, params: &DecodeParameters)
             serialize::<Exchange<Blueprint, Behavior>>(
                 load_blueprint(encoded)?,
                 params ),
-        InterRepr::Tree(()) =>
-            serialize::<Exchange<V, V>>(
-                load_tree(encoded)?
-                    .transpose().ok_or_else(|| JsError::new(
-                        "Blueprint or behavior should not \
-                         be represented with nil" ))?,
-                params ),
+        InterRepr::Tree(()) => {
+            let value = load_tree(encoded)?
+                .transpose().ok_or_else(|| JsError::new(
+                    "Blueprint or behavior should not \
+                    be represented with nil" ))?;
+            serialize::<Exchange<V, V>>(value, params)
+        }
     }
 }
 
