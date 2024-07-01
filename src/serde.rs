@@ -60,14 +60,41 @@ pub(crate) mod option_some {
     pub(crate) fn serialize<T, S>(value: &Option<T>, ser: S)
     -> Result<S::Ok, S::Error>
     where T: Serialize, S: Serializer {
-        value.as_ref().unwrap().serialize(ser)
+        match value.as_ref() {
+            Some(value) => value.serialize(ser),
+            None => unreachable!(),
+        }
     }
+
     pub(crate) fn deserialize<'de, T, D>(de: D)
     -> Result<Option<T>, D::Error>
-    where  T: Deserialize<'de>, D: Deserializer<'de> {
-        Ok(Some(T::deserialize(de)?))
+    where T: Deserialize<'de>, D: Deserializer<'de> {
+        T::deserialize(de).map(Some)
+    }
+
+}
+
+pub(crate) mod option_flat {
+    use serde::{Serialize, Serializer};
+    pub(crate) fn serialize<T, S>(value: &Option<T>, ser: S)
+    -> Result<S::Ok, S::Error>
+    where T: Serialize, S: Serializer {
+        match value.as_ref() {
+            Some(value) => value.serialize(ser),
+            None => ser.serialize_none(),
+        }
     }
 }
+
+#[derive(Serialize, Deserialize)]
+#[serde(
+    transparent,
+    bound(serialize = "T: Serialize", deserialize = "T: Deserialize<'de>")
+)]
+pub(crate) struct FlatOption<T>(
+    #[serde(serialize_with="option_flat::serialize")]
+    pub Option<T>,
+);
 
 pub trait FieldNames {
     fn get_names() -> &'static [&'static str];

@@ -297,9 +297,10 @@ where V: Deserialize<'de>
     fn visit_seq<A>(mut self, mut seq: A) -> Result<Self::Value, A::Error>
     where A: serde::de::SeqAccess<'de>
     {
+        use crate::serde::FlatOption;
         let mut index = 1;
-        while let Some(value) = seq.next_element()? {
-            self.insert(Key::Index(index), value);
+        while let Some(value) = seq.next_element::<FlatOption<_>>()? {
+            self.insert(Key::Index(index), value.0);
             index += 1;
         }
         Ok(self.finish())
@@ -308,8 +309,11 @@ where V: Deserialize<'de>
     fn visit_map<A>(mut self, mut map: A) -> Result<Self::Value, A::Error>
     where A: serde::de::MapAccess<'de>
     {
-        while let Some((key, value)) = map.next_entry::<Key, _>()? {
-            self.insert(key, value);
+        use crate::serde::FlatOption;
+        while let Some((key, value)) =
+            map.next_entry::<Key, FlatOption<_>>()?
+        {
+            self.insert(key, value.0);
         }
         Ok(self.finish())
     }
@@ -638,8 +642,10 @@ where V: Serialize
     fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
     where S: serde::Serializer
     {
+        use crate::serde::FlatOption;
         if self.assoc_loglen().is_none() {
-            ser.collect_seq(&self.array)
+            ser.collect_seq( self.array.iter()
+                .map(Option::as_ref).map(FlatOption) )
         } else {
             ser.collect_map(self)
         }
@@ -652,7 +658,7 @@ where V: Deserialize<'de>
     fn deserialize<D>(de: D) -> Result<Self, D::Error>
     where D: serde::Deserializer<'de>
     {
-        de.deserialize_map(TableMapBuilder::new())
+        de.deserialize_any(TableMapBuilder::new())
     }
 }
 

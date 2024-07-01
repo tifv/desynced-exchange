@@ -1,11 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Exchange,
     load::error::Error as LoadError,
     dump::error::Error as DumpError,
     value as v,
     operand::Value,
+};
+
+pub use crate::{
+    Exchange,
     behavior::Behavior,
 };
 
