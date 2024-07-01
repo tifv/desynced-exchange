@@ -6,6 +6,11 @@ use crate::{
 };
 use super::{Key, KeyRef};
 
+#[inline]
+const fn mask(loglen: u16) -> u32 {
+    iexp2(Some(loglen)) - 1
+}
+
 // https://www.lua.org/source/5.4/lstring.c.html#luaS_hash
 const fn str_table_hash_with_seed<const SEED: u32>(value: &str) -> u32 {
     let value = value.as_bytes();
@@ -86,11 +91,6 @@ impl<V> Item<V> {
     }
 }
 
-#[inline]
-const fn mask(loglen: u16) -> u32 {
-    iexp2(Some(loglen)) - 1
-}
-
 #[derive(Debug, Clone)]
 pub(super) struct Table<V> {
     // SAFETY-BEARING invariant:
@@ -136,7 +136,7 @@ impl<V> Table<V> {
             loglen: self.loglen(),
             last_free: self.last_free(),
         }
-    }    
+    }
 }
 
 impl<V> Table<V> {
@@ -262,6 +262,47 @@ impl<'s, V> Iterator for TableIter<'s, V> {
     type Item = &'s Option<Item<V>>;
     fn next(&mut self) -> Option<Self::Item> {
         self.items.as_mut().and_then(Iterator::next)
+    }
+}
+
+impl<V> Table<V> {
+    pub fn sorted_iter(&'_ self) -> TableSortedIter<'_, V> {
+        TableSortedIter { state: TableSortedIterState::Table(self) }
+    }
+}
+
+pub(super) struct TableSortedIter<'s, V> {
+    state: TableSortedIterState<'s, V>,
+}
+
+pub(super) enum TableSortedIterState<'s, V> {
+    Table(&'s Table<V>),
+    Items(std::vec::IntoIter<&'s Option<Item<V>>>),
+}
+
+impl<'s, V> Iterator for TableSortedIter<'s, V> {
+    type Item = &'s Option<Item<V>>;
+    fn next(&mut self) -> Option<Self::Item> {
+        use TableSortedIterState as State;
+        match self.state {
+            State::Items(ref mut items) => items,
+            State::Table(table) => {
+                let mut items: Vec<_> = table.iter().collect();
+                items.sort_unstable_by_key( |&item_opt|
+                    item_opt.as_ref().and_then(|item| match item {
+                        Item::Dead { .. } => None,
+                        Item::Live { key, .. }
+                            => Some(key),
+                    })
+                );
+                self.state = State::Items(items.into_iter());
+                #[allow(clippy::shadow_unrelated)]
+                let State::Items(ref mut items) = &mut self.state else {
+                    unreachable!()
+                };
+                items
+            },
+        }.next()
     }
 }
 

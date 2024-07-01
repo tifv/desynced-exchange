@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::marker::PhantomData;
+use std::collections::BTreeMap as SortedMap;
 
 mod assoc;
 
@@ -91,10 +92,6 @@ pub struct TableArrayBuilder<V> {
 }
 
 impl<V> TableArrayBuilder<V> {
-
-    pub fn new() -> Self {
-        Self { array: Vec::new() }
-    }
 
     pub fn finish(self) -> Table<V> {
         let Self { array } = self;
@@ -191,10 +188,6 @@ impl<V> TableDumpBuilder<V> {
         Table { array, assoc: assoc.finish() }
     }
 
-    pub fn array_push(&mut self, value: Option<V>) {
-        self.array.push(value);
-    }
-
     pub fn array_extend<I>(&mut self, iter: I)
     where I: IntoIterator<Item=Option<V>>
     {
@@ -212,7 +205,7 @@ impl<V> TableDumpBuilder<V> {
 }
 
 pub struct TableMapBuilder<V> {
-    values: HashMap<Key, Option<V>>,
+    map: SortedMap<Key, Option<V>>,
     dead_keys: Vec<Key>,
 }
 
@@ -221,51 +214,65 @@ impl<V> TableMapBuilder<V> {
     #[must_use]
     fn new() -> Self {
         Self {
-            values: HashMap::new(),
+            map: SortedMap::new(),
             dead_keys: Vec::new(),
         }
     }
 
     #[must_use]
     pub fn finish(self) -> Table<V> {
-        let Self { mut values, dead_keys } = self;
+        let Self { mut map, dead_keys } = self;
         let mut array = Vec::new();
-        let max_len = i32::try_from(values.len())
+        let max_len = i32::try_from(map.len())
             .unwrap_or(i32::MAX).saturating_mul(2);
         let mut array_len: usize = 0;
-        for index in 1 ..= max_len {
-            let Some(value) = values.remove(&Key::Index(index)) else {
-                continue
-            };
-            let Some(value) = value else {
-                values.insert(Key::Index(index), value);
-                continue
+        let mut nonpositive_items = Vec::new();
+        loop {
+            let Some(entry) = map.first_entry() else { break; };
+            let index = match *entry.key() {
+                Key::Index(index) if index <= 0 => {
+                    nonpositive_items.push(entry.remove_entry());
+                    continue;
+                },
+                Key::Index(index) if index <= max_len => index,
+                _ => break,
             };
             let index = u32_to_usize((index - 1) as u32);
             if array.len() <= index {
                 array.resize_with(index + 1, || None);
             }
-            array[index] = Some(value);
-            array_len += 1;
+            let (_, value) = entry.remove_entry();
+            if value.is_some() {
+                array_len += 1;
+            }
+            let None = std::mem::replace(&mut array[index], value) else {
+                unreachable!()
+            };
         }
-        while array_len.saturating_mul(2) < array.len() {
-            let index = i32::try_from(array.len()).unwrap();
-            let value = array.pop().unwrap();
-            array_len -= 1;
-            values.insert(Key::Index(index), value);
+        map.extend(nonpositive_items);
+        loop {
             while matches!(array.last(), Some(None)) {
                 array.pop();
             }
+            if array_len.saturating_mul(2) >= array.len() {
+                break;
+            }
+            let index = i32::try_from(array.len()).unwrap();
+            let Some(value) = array.pop() else {
+                unreachable!()
+            };
+            array_len -= 1;
+            map.insert(Key::Index(index), value);
         }
         let mut table = TableDumpBuilder::new(
             Some(array.len().try_into().unwrap()),
             ilog2_ceil(
-                usize::checked_add(values.len(), dead_keys.len())
+                usize::checked_add(map.len(), dead_keys.len())
                     .unwrap()
             ),
         );
         table.array_extend(array);
-        for (key, value) in values {
+        for (key, value) in map {
             table.assoc_insert(key, value);
         }
         for key in dead_keys {
@@ -275,13 +282,13 @@ impl<V> TableMapBuilder<V> {
     }
 
     pub fn insert<K: Into<Key>>(&mut self, key: K, value: Option<V>) {
-        let old_value = self.values.insert(key.into(), value);
+        let old_value = self.map.insert(key.into(), value);
         assert!(old_value.is_none());
     }
 
-    pub fn insert_assoc_dead<K: Into<Key>>(&mut self, key: K) {
-        self.dead_keys.push(key.into());
-    }
+    // pub fn insert_assoc_dead<K: Into<Key>>(&mut self, key: K) {
+    //     self.dead_keys.push(key.into());
+    // }
 
 }
 
@@ -361,40 +368,62 @@ impl<'s, V: Dump> crate::dump::DumpTableIterator<'s> for TableDumpIter<'s, V> {
     type Value = V;
 }
 
-impl<V> IntoIterator for Table<V> {
-    type Item = (Key, V);
-    type IntoIter = TableIntoIter<V>;
-    fn into_iter(self) -> Self::IntoIter {
-        TableIntoIter {
-            array_iter: Some(self.array.into_iter().enumerate()),
-            assoc_iter: Some(self.assoc.into_iter()),
-        }
-    }
+trait TableItemAdapter {
+    type InputArrayItem;
+    type InputAssocItem;
+    type OutputKey;
+    type OutputValue;
+    fn adapt_array(index: i32, value: Self::InputArrayItem)
+    -> Option<(Self::OutputKey, Self::OutputValue)>;
+    fn adapt_assoc(item: Self::InputAssocItem)
+    -> Option<(Self::OutputKey, Self::OutputValue)>;
 }
 
-pub struct TableIntoIter<V> {
-    array_iter: Option<std::iter::Enumerate<
-        std::vec::IntoIter<Option<V>> >>,
-    assoc_iter: Option<assoc::TableIntoIter<V>>,
+struct TableChainIter<K, V, I, J, A>
+where
+    I: Iterator,
+    J: Iterator,
+    A: TableItemAdapter<
+        InputArrayItem = I::Item,
+        InputAssocItem = J::Item,
+        OutputKey = K,
+        OutputValue = V,
+    >,
+{
+    array_iter: Option<std::iter::Enumerate<I>>,
+    assoc_iter: Option<J>,
+    adapter: PhantomData<A>,
 }
 
-impl<V> Iterator for TableIntoIter<V> {
-    type Item = (Key, V);
+impl<K, V, I, J, A> Iterator for TableChainIter<K, V, I, J, A>
+where
+    I: Iterator,
+    J: Iterator,
+    A: TableItemAdapter<
+        InputArrayItem = I::Item,
+        InputAssocItem = J::Item,
+        OutputKey = K,
+        OutputValue = V,
+    >,
+{
+    type Item = (K, V);
+
     fn next(&mut self) -> Option<Self::Item> {
         while let Some((index, value)) =
             self.array_iter.as_mut().and_then(Iterator::next)
         {
-            let Some(value) = value else { continue };
             let Some(index) = index
                 .checked_add(1)
                 .map(i32::try_from).and_then(Result::ok)
                 else { unreachable!() };
-            return Some((Key::Index(index), value));
+            let Some((key, value)) = A::adapt_array(index, value)
+                else { continue };
+            return Some((key, value));
         }
         while let Some(item) =
             self.assoc_iter.as_mut().and_then(Iterator::next)
         {
-            let Some(AssocItem::Live { value: Some(value), key, .. }) = item
+            let Some((key, value)) = A::adapt_assoc(item)
                 else { continue };
             return Some((key, value));
         }
@@ -402,50 +431,133 @@ impl<V> Iterator for TableIntoIter<V> {
     }
 }
 
+impl<V> IntoIterator for Table<V> {
+    type Item = (Key, V);
+    type IntoIter = TableIntoIter<V>;
+    fn into_iter(self) -> Self::IntoIter {
+        TableIntoIter { inner: TableChainIter {
+            array_iter: Some(self.array.into_iter().enumerate()),
+            assoc_iter: Some(self.assoc.into_iter()),
+            adapter: PhantomData,
+        } }
+    }
+}
+
+pub struct TableIntoIter<V> {
+    inner: TableChainIter<Key, V,
+        std::vec::IntoIter<Option<V>>,
+        assoc::TableIntoIter<V>,
+        TableIntoIterAdapter<V> >
+}
+
+struct TableIntoIterAdapter<V>(PhantomData<V>);
+
+impl<V> TableItemAdapter for TableIntoIterAdapter<V> {
+    type InputArrayItem = Option<V>;
+    type InputAssocItem = Option<AssocItem<V>>;
+    type OutputKey = Key;
+    type OutputValue = V;
+
+    #[inline]
+    fn adapt_array(index: i32, value: Self::InputArrayItem)
+    -> Option<(Self::OutputKey, Self::OutputValue)> {
+        value.map(|v| (Key::Index(index), v))
+    }
+
+    #[inline]
+    fn adapt_assoc(item: Self::InputAssocItem)
+    -> Option<(Self::OutputKey, Self::OutputValue)> {
+        let Some(AssocItem::Live { value: Some(value), key, .. }) = item
+            else { return None };
+        Some((key, value))
+    }
+
+}
+
+impl<V> Iterator for TableIntoIter<V> {
+    type Item = (Key, V);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
+}
+
 impl<'s, V> IntoIterator for &'s Table<V> {
     type Item = (KeyRef<'s>, &'s V);
     type IntoIter = TableIter<'s, V>;
     fn into_iter(self) -> Self::IntoIter {
-        TableIter {
-            array_iter: Some(self.array.iter().enumerate()),
-            assoc_iter: Some(self.assoc.iter()),
-        }
+        self.iter()
     }
 }
 
 impl<V> Table<V> {
     pub fn iter(&'_ self) -> TableIter<'_, V> {
-        <&Self as IntoIterator>::into_iter(self)
+        TableIter { inner: TableChainIter {
+            array_iter: Some(self.array.iter().enumerate()),
+            assoc_iter: Some(self.assoc.iter()),
+            adapter: PhantomData,
+        } }
     }
 }
 
 pub struct TableIter<'s, V> {
-    array_iter: Option<std::iter::Enumerate<
-        std::slice::Iter<'s, Option<V>> >>,
-    assoc_iter: Option<assoc::TableIter<'s, V>>,
+    inner: TableChainIter<KeyRef<'s>, &'s V,
+        std::slice::Iter<'s, Option<V>>,
+        assoc::TableIter<'s, V>,
+        TableIterAdapter<'s, V> >
+}
+
+struct TableIterAdapter<'s, V>(PhantomData<&'s V>);
+
+impl<'s, V> TableItemAdapter for TableIterAdapter<'s, V> {
+    type InputArrayItem = &'s Option<V>;
+    type InputAssocItem = &'s Option<AssocItem<V>>;
+    type OutputKey = KeyRef<'s>;
+    type OutputValue = &'s V;
+
+    #[inline]
+    fn adapt_array(index: i32, value: Self::InputArrayItem)
+    -> Option<(Self::OutputKey, Self::OutputValue)> {
+        value.as_ref().map(|v| (KeyRef::Index(index), v))
+    }
+
+    #[inline]
+    fn adapt_assoc(item: Self::InputAssocItem)
+    -> Option<(Self::OutputKey, Self::OutputValue)> {
+        let Some(AssocItem::Live { value: Some(value), key, .. }) = item
+            else { return None };
+        Some((key.as_ref(), value))
+    }
+
 }
 
 impl<'s, V> Iterator for TableIter<'s, V> {
     type Item = (KeyRef<'s>, &'s V);
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some((index, value)) =
-            self.array_iter.as_mut().and_then(Iterator::next)
-        {
-            let Some(value) = value else { continue };
-            let Some(index) = index
-                .checked_add(1)
-                .map(i32::try_from).and_then(Result::ok)
-                else { unreachable!() };
-            return Some((KeyRef::Index(index), value));
-        }
-        while let Some(item) =
-            self.assoc_iter.as_mut().and_then(Iterator::next)
-        {
-            let Some(AssocItem::Live { value: Some(value), key, .. }) = item
-                else { continue };
-            return Some((key.as_ref(), value));
-        }
-        None
+        self.inner.next()
+    }
+}
+
+impl<V> Table<V> {
+    pub fn sorted_iter(&'_ self) -> TableSortedIter<'_, V> {
+        TableSortedIter { inner: TableChainIter {
+            array_iter: Some(self.array.iter().enumerate()),
+            assoc_iter: Some(self.assoc.sorted_iter()),
+            adapter: PhantomData,
+        } }
+    }
+}
+
+pub struct TableSortedIter<'s, V> {
+    inner: TableChainIter<KeyRef<'s>, &'s V,
+        std::slice::Iter<'s, Option<V>>,
+        assoc::TableSortedIter<'s, V>,
+        TableIterAdapter<'s, V> >
+}
+
+impl<'s, V> Iterator for TableSortedIter<'s, V> {
+    type Item = (KeyRef<'s>, &'s V);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
     }
 }
 
@@ -647,7 +759,7 @@ where V: Serialize
             ser.collect_seq( self.array.iter()
                 .map(Option::as_ref).map(FlatOption) )
         } else {
-            ser.collect_map(self)
+            ser.collect_map(self.sorted_iter())
         }
     }
 }
