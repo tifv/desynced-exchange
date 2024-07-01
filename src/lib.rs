@@ -1,10 +1,10 @@
 //! This crate decodes and encodes blueprint exchange strings generated
 //! by the Desynced game.
-//! 
+//!
 //! The game allows exporting both blueprints and behaviours
 //! as exchange strings.
 //! Here they both will be denoted as “blueprints”.
-//! 
+//!
 //! A rough description of a blueprint string structure:
 //! * header indicating whether it is a blueprint or a behaviour;
 //! * encoded length of uncompressed data, or zero in case of
@@ -12,7 +12,7 @@
 //! * base62-encoding (followed by a checksum digit) of
 //! * (optionally) zlib-compression of
 //! * low-level binary encoding of Lua data structures.
-//! 
+//!
 //! The last step is the most interesting one and will be discussed in
 //! the following sections.
 //! The steps before that are fairly straightforward.
@@ -20,9 +20,9 @@
 //! this library will opt to compress except the shorter strings
 //! (the game may make somewhat different choice when creating strings,
 //! but it doesn't seem to matter).
-//! 
+//!
 //! ## Lua data types
-//! 
+//!
 //! The following data types are used in the serialized blueprints:
 //! * `nil`;
 //! * booleans;
@@ -30,44 +30,44 @@
 //! * double-precision floating point numbers;
 //! * UTF-8 encoded strings;
 //! * tables.
-//! 
+//!
 //! Tables are Lua's associative arrays. Lua allows keys to be arbitrary
 //! values, but in blueprints keys are always integers and strings.
-//! 
+//!
 //! ## Nuances
-//! 
+//!
 //! The blueprint exchange strings… let's just say that they were not
 //! designed with interoperability in mind.
 //! Therefore this section will be non-trivial.
-//! 
+//!
 //! When Lua deletes an item from a table (which you can think of as
 //! an array of key-value pairs), it sets the value to `nil`.
 //! The garbage collector will later find such key and clear it,
 //! replacing it with a `deadkey` tombstone.
-//! 
+//!
 //! You may ask at this point, why not remove deleted keys at
 //! the decoder level?
 //! Wouldn't we be able to completely ignore the existence
 //! of dead keys both when decoding and encoding?
-//! 
+//!
 //! Alas, the latter is not true.
 //! There are cases when the game expects there to be a dead key in
 //! the serialized table.
 //! If you omit it, the blueprint string will not be recognized
 //! by the game.
-//! 
+//!
 //! Therefore dead keys are a necessary element of encoding process.
 //! While decoding doesn't technically need them, dead keys
 //! are retained during it anyway to maintain logical
 //! correspondence
 //! (but mainly to serve debugging needs and
 //! blueprint → `value::Value` → blueprint conversion).
-//! 
+//!
 //! ### A dead key case
-//! 
+//!
 //! Actually, at this moment only one case is known when
 //! the blueprint will not be recognized without a certain dead key.
-//! 
+//!
 //! A behaviour contains a sequence of instructions;
 //! each instruction is encoded as a table.
 //! An instruction table
@@ -76,11 +76,11 @@
 //! * may contain `next` field with the index of the next instruction
 //!   (omitted when the next instruction sits literally next in the sequence);
 //! * may contain other fields such as `txt`, `c`, `cmt`, `nx`, `ny`.
-//! 
+//!
 //! The problem is with the `next` field.
 //! It cannot be completely omitted: you must either include it
 //! (with a normal value or `nil`) or add the corresponding tombstone.
-//! 
+//!
 //! (Since I can't actually look into the game's code, the previous
 //! paragraph is my observation of what seems to work in practice.)
 
