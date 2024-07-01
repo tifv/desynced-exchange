@@ -13,10 +13,11 @@ jobs:
       run:
         shell: bash
     steps:
+    - name: Print Rust version
+      run: |
+        rustc --version && cargo --version
     - name: Ensure wasm-pack
       run: |
-        rustc --version
-        cargo --version
         cargo install wasm-pack
     - name: Checkout
       uses: actions/checkout@v3
