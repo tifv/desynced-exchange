@@ -25,7 +25,7 @@ jobs:
         mkdir ./build ./build/assets
     - name: Copy static files
       run: |
-        find webconv/www/ -maxdepth 1 -type f \
+        find ./webconv/www/ -maxdepth 1 -type f \
           '(' -name '*.html' -o -name '*.js' ')' \
           -exec cp --verbose '{}' ./build ';'
     - name: Compile
@@ -34,7 +34,10 @@ jobs:
         wasm-pack build --target web
     - name: Move Wasm package
       run: |
-        mv ./webconv/pkg ./build/pkg
+        mv ./webconv/pkg ./build/lib &&
+        find ./build/lib/ -type f \
+          '!' '(' -name '*.js' -o -name '*.wasm' ')' \
+          -delete
     # - name: Get GitHub logo
     #   run: |
     #     wget https://github.githubassets.com/images/modules/logos_page/github-mark.zip &&

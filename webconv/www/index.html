@@ -4,172 +4,120 @@
 <head>
     <title>Desynced blueprint decoder/encoder</title>
     <style>
+        textarea {
+            min-width: 600px;
+            min-height: 400px;
+        }
         .buttons__switch {
             margin-block: 2ex;
         }
     </style>
 </head>
 <body>
-    <div id="game-mode">
-        <div class="buttons buttons__switch">
-            <button data-action="goto-ron">Clear and switch to RON</button>
-            <button data-action="goto-json">Clear and switch to JSON</button>
-        </div>
-        <h2>Encoded (blueprint/behavior string)</h2>
-        <textarea style="min-width: 600px;" rows="15"></textarea>
-        <div class="buttons">
-            <button data-action="convert-game-to-ron">Decode to RON</button>
-            <button data-action="convert-game-to-json">Decode to JSON</button>
-        </div>
-        <div class="errors"></div>
+    <div class="stage stage__loading">
+        <span class="stage__loading--message">Loading…</span>
     </div>
-    <div id="ron-mode">
+    <div class="stage stage__main" hidden>
+        <h1 class="title"></h1>
+        <h2 class="pane_title"></h1>
         <div class="buttons buttons__switch">
-            <button data-action="goto-game">Clear and switch to blueprint</button>
+            <button data-action="go_to_decoded"
+                hidden data-show_state="encoded"
+               >Reset and switch to decoded</button>
+            <button data-action="go_to_encoded"
+                hidden data-show_state="decoded"
+               >Reset and switch to encoded</button>
         </div>
-        <h2>Decoded (RON)</h2>
-        <textarea style="min-width: 600px;" rows="15"></textarea>
-        <div class="buttons">
-            <button data-action="convert-ron-to-game">Encode</button>
+        <div class="buttons buttons__convert">
+            <button data-action="cv_to_decoded"
+                hidden data-show_state="encoded"
+               >Decode</button>
+            <button data-action="cv_to_encoded"
+                hidden data-show_state="decoded"
+               >Encode</button>
         </div>
-        <div class="errors"></div>
-    </div>
-    <div id="json-mode">
-        <div class="buttons buttons__switch">
-            <button data-action="goto-game">Clear and switch to blueprint</button>
+        <div class="spoiler settings">
+            <h5 class="spoiler--heading">Settings</h5>
+            <div class="spoiler--inner">
+                <fieldset>
+                    <legend>Decode format:</legend>
+                    <input id="decode_format--ron"
+                        type="radio" name="decode_format" value="ron" checked />
+                        <label for="decode_format--ron">RON</label>
+                    <input id="decode_format--json"
+                        type="radio" name="decode_format" value="json" />
+                        <label for="decode_format--json">JSON</label>
+                </fieldset>
+                <fieldset>
+                    <legend>Decode style:</legend>
+                    <input id="decode_style--pretty"
+                        type="radio" name="decode_style" value="pretty" checked />
+                        <label for="decode_style--pretty">Pretty</label>
+                    <input id="decode_style--compact"
+                        type="radio" name="decode_style" value="compact" />
+                        <label for="decode_style--compact">Compact</label>
+                </fieldset>
+                <fieldset>
+                    <legend>Intermediate representation:</legend>
+                    <input id="inter_repr--struct"
+                        type="radio" name="inter_repr" value="struct" checked />
+                        <label for="inter_repr--struct">Structure</label>
+                    <input id="inter_repr--tree"
+                        type="radio" name="inter_repr" value="tree" />
+                        <label for="inter_repr--tree">Tree</label>
+                    <div class="comment"
+                       >Tree representation will give a more nuanced
+                        look into the structure of a blueprint, but
+                        will fail to decode for various reasons.</div>
+                </fieldset>
+            </div>
         </div>
-        <h2>Decoded (JSON)</h2>
-        <textarea style="min-width: 600px;" rows="15"></textarea>
-        <div class="buttons">
-            <button data-action="convert-json-to-game">Encode</button>
+        <div id="pane__encoded" class="pane"
+            hidden data-show_state="encoded" >
+            <div class="errors"></div>
+            <textarea class="contents"></textarea>
         </div>
-        <div class="errors"></div>
+        <div id="pane__decoded" class="pane"
+            hidden data-show_state="decoded" >
+            <div class="errors"></div>
+            <textarea class="contents"></textarea>
+        </div>
+        <!-- <div id="game-mode">
+            <div class="buttons buttons__switch">
+                <button data-action="goto-ron">Clear and switch to RON</button>
+                <button data-action="goto-json">Clear and switch to JSON</button>
+            </div>
+            <h2>Encoded (blueprint/behavior string)</h2>
+            <textarea style="min-width: 600px;" rows="15"></textarea>
+            <div class="buttons">
+                <button data-action="convert-game-to-ron">Decode to RON</button>
+                <button data-action="convert-game-to-json">Decode to JSON</button>
+            </div>
+            <div class="errors"></div>
+        </div>
+        <div id="ron-mode">
+            <div class="buttons buttons__switch">
+                <button data-action="goto-game">Clear and switch to blueprint</button>
+            </div>
+            <h2>Decoded (RON)</h2>
+            <textarea style="min-width: 600px;" rows="15"></textarea>
+            <div class="buttons">
+                <button data-action="convert-ron-to-game">Encode</button>
+            </div>
+            <div class="errors"></div>
+        </div>
+        <div id="json-mode">
+            <div class="buttons buttons__switch">
+                <button data-action="goto-game">Clear and switch to blueprint</button>
+            </div>
+            <h2>Decoded (JSON)</h2>
+            <textarea style="min-width: 600px;" rows="15"></textarea>
+            <div class="buttons">
+                <button data-action="convert-json-to-game">Encode</button>
+            </div>
+            <div class="errors"></div>
+        </div> -->
     </div>
 </body>
-<script type="module">
-    import * as desynced_exchange_web from "./pkg/desynced_exchange_web.js";
-
-    class StateMaintainer {
-        constructor(states, startState) {
-            this.states = states;
-            this._checkState(startState);
-            this.state = startState;
-        }
-        _checkState(state) {
-            if (state === null) {
-                throw new Error("Valid state cannot be null");
-            }
-            if (this.states[state] === undefined) {
-                throw new Error("Undefined state " + state);
-            }
-        }
-        async switchState(action, oldState, newState) {
-            if (oldState === null) {
-                throw new Error("Invalid action old state");
-            }
-            if (newState === null) {
-                throw new Error("Invalid action new state");
-            } else {
-                this._checkState(newState);
-            }
-            if (this.state !== oldState) {
-                throw new Error("Out-of-order action");
-            }
-            this.state = null;
-            let result;
-            try {
-                result = await action();
-                this.states[oldState].exit.call(this);
-                this.states[newState].enter.call(this);
-                this.state = newState;
-            } catch (error) {
-                this.state = oldState;
-                throw error;
-            }
-            return result;
-        }
-    }
-
-    async function main() {
-        await desynced_exchange_web.default();
-        function setupState(state) {
-            let section = document.getElementById(state + "-mode");
-            return {
-                enter() {
-                    section
-                        .style.setProperty("display", null);
-                },
-                exit() {
-                    section.style
-                        .setProperty("display", "none");
-                    section.querySelector('textarea')
-                        .value = "";
-                    section.querySelector('.errors')
-                        .innerHTML = "";
-                },
-            }
-        }
-        let state = new StateMaintainer({
-            "game": setupState("game"),
-            "ron" : setupState("ron" ),
-            "json": setupState("json"),
-        }, "game");
-        state.states.game.enter();
-        state.states.ron .exit();
-        state.states.json.exit();
-        function defineConvert(src, dst, conversion) {
-            if (src == dst) {
-                throw new Error("invalid action");
-            }
-            let action = () => {
-                state.switchState(() => {
-                    try {
-                        let input = document.getElementById(src + "-mode")
-                            .querySelector('textarea');
-                        let output = document.getElementById(dst + "-mode")
-                            .querySelector('textarea');
-                        output.value = conversion(input.value.trim());
-                    } catch (error) {
-                        document.getElementById(src + "-mode")
-                            .querySelector('.errors')
-                            .innerHTML = error
-                        throw error;
-                    }
-                }, src, dst)
-            };
-            document.getElementById(src + "-mode")
-                .querySelector("button[data-action=convert-" + src + "-to-" + dst + "]")
-                .addEventListener("click", action);
-            // XXX need to detect last used RON/JSON
-            // document.getElementById(src + "-mode")
-            //     .querySelector("textarea")
-            //     .addEventListener("keydown", (e) => {
-            //         if (e.keyCode != 13 || !e.ctrlKey) {
-            //             return;
-            //         }
-            //         return action();
-            //     })
-        }
-        defineConvert("game", "ron" , desynced_exchange_web.exchange_to_ron );
-        defineConvert("game", "json", desynced_exchange_web.exchange_to_json);
-        defineConvert("ron" , "game", desynced_exchange_web.ron_to_exchange );
-        defineConvert("json", "game", desynced_exchange_web.json_to_exchange);
-        function defineGoto(src, dst) {
-            if (src == dst) {
-                throw new Error("invalid action");
-            }
-            document.getElementById(src + "-mode")
-            .querySelector("button[data-action=goto-" + dst + "]")
-            .addEventListener("click", () => {
-                state.switchState(() => {}, src, dst)
-            });
-        }
-        defineGoto("game", "ron" );
-        defineGoto("game", "json");
-        defineGoto("ron" , "game");
-        defineGoto("json", "game");
-    }
-
-    main();
-</script>
+<script type="module" src="./main.js"></script>
 </html>
