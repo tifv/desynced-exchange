@@ -76,6 +76,7 @@ impl TableHeader {
 
 impl<'data> Loader<'data> {
 
+    #[must_use]
     pub fn new(data: &'data [u8]) -> Self {
         // The most compact representation of an array element
         // is bitmask, which is eight (nil) elements per one byte.
