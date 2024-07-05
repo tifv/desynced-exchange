@@ -11,7 +11,8 @@ pub(crate) struct IntLimError;
 use crate::ascii::Ascii;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// Invariant: the value in the struct cannot be `>= L`
+// SAFETY_BEARING invariant:
+// the value in the struct cannot be `>= L`
 pub(crate) struct IntLim<const L: u8>(u8);
 
 pub(crate) type Int31 = IntLim<31>;
@@ -19,8 +20,26 @@ pub(crate) type Int62 = IntLim<62>;
 
 impl<const L: u8> IntLim<L> {
 
+    #[inline]
+    pub(crate) const fn new(value: u8) -> Result<Self, IntLimError> {
+        if value < L {
+            Ok(Self(value))
+        } else {
+            Err(IntLimError)
+        }
+    }
+
+    #[inline]
+    #[must_use]
     pub(crate) const unsafe fn new_unchecked(value: u8) -> Self {
-        Self(value)
+        //! # Safety
+        //! The caller guarantees that the value is less that `L`.
+        match Self::new(value) {
+            Ok(value) => value,
+            Err(_) =>
+                // SAFETY: ensured by the caller
+                unsafe { unreachable_unchecked() },
+        }
     }
 
     #[inline]
@@ -29,12 +48,13 @@ impl<const L: u8> IntLim<L> {
     }
 
     #[inline]
-    pub(crate) fn zero() -> Self {
+    pub(crate) const fn zero() -> Self {
         assert!(L > 0);
         Self(0)
     }
 
     #[inline]
+    #[must_use]
     pub(crate) const fn divrem(value: u32) -> (u32, Self) {
         Self::assert_base();
         let rem = value % (L as u32);
@@ -43,13 +63,15 @@ impl<const L: u8> IntLim<L> {
     }
 
     #[inline]
+    #[must_use]
     pub(crate) const fn be_decompose<const N: usize>(
         value: u32 ) -> (usize, [Self; N])
     {
+        //! Returns `(leading_zeros, digits)`
         Self::assert_base();
         // conversion sanity check
         assert!(u32::BITS <= usize::BITS && N <= u32::MAX as usize);
-        // overflow check
+        // SAFETY-BEARING overflow check
         assert!(match (L as u32).checked_pow(N as u32) {
             None => true,
             Some(max) => max > value,
@@ -91,19 +113,24 @@ impl<const L: u8> IntLim<L> {
     }
 
     #[inline]
+    #[must_use]
     pub(crate) const fn sufficient_digits() -> usize {
         (u32::MAX.ilog(L as u32) + 1) as usize
     }
 
 }
 
+impl<const L: u8> Default for IntLim<L> {
+    fn default() -> Self {
+        Self::zero()
+    }
+}
+
 impl<const L: u8> TryFrom<u8> for IntLim<L> {
     type Error = IntLimError;
     #[inline]
     fn try_from(value: u8) -> Result<Self, Self::Error> {
-        (value < L)
-            .then_some(value).map(Self)
-            .ok_or(IntLimError)
+        Self::new(value)
     }
 }
 
@@ -120,6 +147,7 @@ impl<const L: u8> From<IntLim<L>> for u8 {
 }
 
 #[inline]
+#[must_use]
 pub(crate) fn encode_base62(value: Int62) -> Ascii {
     let value = value.0;
     let encoded = match value {
@@ -148,15 +176,16 @@ pub(crate) fn decode_base62(value: Ascii) -> Result<Int62, IntLimError> {
 
 impl Int31 {
     #[inline]
+    #[must_use]
     pub(super) fn add_31(self) -> Int62 {
-        IntLim::<62>(self.0 + 31)
+        IntLim::<62>(u8::from(self) + 31)
     }
 }
 
 impl From<Int31> for Int62 {
     #[inline]
     fn from(value: Int31) -> Int62 {
-        Self(value.0)
+        Self(u8::from(value))
     }
 }
 
@@ -164,10 +193,10 @@ impl Int62 {
     #[inline]
     pub(super) fn try_as_31(self) -> Result<Int31, Int31> {
         match self.0 {
-            // SAFETY: `b` lies in range
-            b @  0 ..= 30 => Ok (unsafe { Int31::new_unchecked(b) }),
-            // SAFETY: `b - 31` lies in range
-            b @ 31 ..= 61 => Err(unsafe { Int31::new_unchecked(b - 31) }),
+            // SAFETY: `x` lies in range
+            x @  0 ..= 30 => Ok (unsafe { Int31::new_unchecked(x) }),
+            // SAFETY: `x - 31` lies in range
+            x @ 31 ..= 61 => Err(unsafe { Int31::new_unchecked(x - 31) }),
             // SAFETY: `Int62` struct invariant
             62 ..= u8::MAX => unsafe { unreachable_unchecked() }
         }

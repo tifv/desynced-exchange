@@ -1,10 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    load::error::Error as LoadError,
-    dump::error::Error as DumpError,
-    value as v,
-    operand::Value,
+    error::{LoadError, DumpError},
+    value::Value,
+    operand::OpValue,
 };
 
 pub use crate::{
@@ -38,7 +37,7 @@ pub struct Blueprint {
 
     #[serde( default,
         skip_serializing_if="Vec::is_empty" )]
-    pub registers: Vec<Option<Value>>,
+    pub registers: Vec<Option<OpValue>>,
 
     #[serde( default,
         skip_serializing_if="Vec::is_empty" )]
@@ -46,14 +45,14 @@ pub struct Blueprint {
 
 }
 
-impl TryFrom<v::Value> for Blueprint {
+impl TryFrom<Value> for Blueprint {
     type Error = LoadError;
-    fn try_from(value: v::Value) -> Result<Self, Self::Error> {
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
         todo!()
     }
 }
 
-impl From<Blueprint> for v::Value {
+impl From<Blueprint> for Value {
     fn from(value: Blueprint) -> Self {
         todo!()
     }
@@ -63,15 +62,15 @@ impl From<Blueprint> for v::Value {
 pub struct Component {
     item: String,
     index: i32,
-    registers: Vec<Option<Value>>,
+    registers: Vec<Option<OpValue>>,
     behavior: Option<Behavior>,
 }
 
 pub fn load_blueprint(exchange: &str)
 -> Result<Exchange<Blueprint, Behavior>, LoadError>
 {
-    type V = v::Value;
-    let value = crate::load::load_blueprint::<V, V>(exchange)?;
+    type V = Value;
+    let value = crate::loader::load_blueprint::<V, V, LoadError>(exchange)?;
     let value = value.transpose().ok_or_else(|| LoadError::from(
         "Blueprint or behavior should not be represented with nil" ))?;
     value.map(Blueprint::try_from, Behavior::try_from).transpose()
@@ -80,10 +79,10 @@ pub fn load_blueprint(exchange: &str)
 pub fn dump_blueprint(blueprint: Exchange<Blueprint, Behavior>)
 -> Result<String, DumpError>
 {
-    type V = v::Value;
+    type V = Value;
     let value = blueprint.map(Blueprint::into, Behavior::into)
         .map(Some, Some);
-    crate::dump::dump_blueprint::<V, V>(value)
+    crate::dumper::dump_blueprint::<V, V>(value)
 }
 
 #[cfg(test)]

@@ -1,15 +1,17 @@
 use wasm_bindgen::prelude::*;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_json as json;
 use ron as ron;
 
 use desynced_exchange::{
-    load::load_blueprint as load_tree,
-    dump::dump_blueprint as dump_tree,
-    value::Value,
+    error::LoadError,
+    dumper::dump_blueprint as dump,
+    loader::load_blueprint as load,
+    value::map_tree::Value as MTValue,
+    value::serde_dump::Value as DValue,
     blueprint::{
-        load_blueprint, dump_blueprint,
+        dump_blueprint, load_blueprint,
         Exchange, Blueprint, Behavior,
     }
 };
@@ -77,18 +79,20 @@ impl TryFrom<&str> for DecodeStyle {
     }
 }
 
-enum InterRepr<S, T> {
-    Struct(S),
-    Tree(T),
+enum InterRepr {
+    Struct,
+    MapTree,
+    TableDump,
 }
 
-impl TryFrom<&str> for InterRepr<(), ()> {
+impl TryFrom<&str> for InterRepr {
     type Error = JsError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         Ok(match value {
-            "struct"  => Self::Struct(()),
-            "tree"    => Self::Tree(()),
+            "struct"  => Self::Struct,
+            "map_tree"    => Self::MapTree,
+            "table_dump"    => Self::TableDump,
             other => return Err(JsError::new(
                 &format!("unrecognized intermediate repr {other:?}") )),
         })
@@ -102,7 +106,7 @@ impl DecodeParameters {
     fn decode_style(&self) -> Result<DecodeStyle, JsError> {
         self.decode_style_s().as_str().try_into()
     }
-    fn inter_repr(&self) -> Result<InterRepr<(), ()>, JsError> {
+    fn inter_repr(&self) -> Result<InterRepr, JsError> {
         self.inter_repr_s().as_str().try_into()
     }
 }
@@ -111,7 +115,7 @@ impl EncodeParameters {
     fn decode_format(&self) -> Result<DecodeFormat, JsError> {
         self.decode_format_s().as_str().try_into()
     }
-    fn inter_repr(&self) -> Result<InterRepr<(), ()>, JsError> {
+    fn inter_repr(&self) -> Result<InterRepr, JsError> {
         self.inter_repr_s().as_str().try_into()
     }
 }
@@ -120,17 +124,27 @@ impl EncodeParameters {
 pub fn decode(encoded: &str, params: &DecodeParameters)
 -> Result<String, JsError>
 {
-    use Value as V;
     match params.inter_repr()? {
-        InterRepr::Struct(()) =>
+        InterRepr::Struct =>
             serialize::<Exchange<Blueprint, Behavior>>(
                 load_blueprint(encoded)?,
                 params ),
-        InterRepr::Tree(()) => {
-            let value = load_tree(encoded)?
+        InterRepr::MapTree => {
+            use MTValue as V;
+            let value = load::<_,_,LoadError>(encoded)?
                 .transpose().ok_or_else(|| JsError::new(
                     "Blueprint or behavior should not \
-                    be represented with nil" ))?;
+                    be represented with nil" ))?
+                .map_mono(V);
+            serialize::<Exchange<V, V>>(value, params)
+        }
+        InterRepr::TableDump => {
+            use DValue as V;
+            let value = load::<_,_,LoadError>(encoded)?
+                .transpose().ok_or_else(|| JsError::new(
+                    "Blueprint or behavior should not \
+                    be represented with nil" ))?
+                .map_mono(V);
             serialize::<Exchange<V, V>>(value, params)
         }
     }
@@ -175,15 +189,23 @@ where V: Serialize,
 pub fn encode(decoded: &str, params: &EncodeParameters)
 -> Result<String, JsError>
 {
-    use Value as V;
     Ok(match params.inter_repr()? {
-        InterRepr::Struct(()) =>
+        InterRepr::Struct =>
             dump_blueprint(deserialise(decoded, params)?)?,
-        InterRepr::Tree(()) =>
-            dump_tree(
+        InterRepr::MapTree => {
+            use MTValue as V;
+            dump(
                 deserialise::<Exchange<V, V>>(decoded, params)?
-                    .map_mono(Some)
-            )?,
+                    .map_mono(V::into_inner).map_mono(Some)
+            )?
+        },
+        InterRepr::TableDump => {
+            use DValue as V;
+            dump(
+                deserialise::<Exchange<V, V>>(decoded, params)?
+                    .map_mono(V::into_inner).map_mono(Some)
+            )?
+        },
     })
 }
 

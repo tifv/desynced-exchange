@@ -3,25 +3,20 @@ use std::collections::BTreeMap as SortedMap;
 
 mod assoc;
 
-use serde::{Deserialize, Serialize};
-
 use crate::{
-    table::{
-        KeyRef,
-        TableItem,
-        iexp2, u32_to_usize, ilog2_ceil,
-    },
-    dump::Dump,
-    load,
+    common::{u32_to_usize, iexp2, ilog2_ceil},
+    string::Str,
+    table_iter::{TableItem, TableSize},
 };
 
 use self::assoc::{
-    Table as AssocTable, Item as AssocItem,
-    TableLoadBuilder as AssocTableLoadBuilder,
-    TableDumpBuilder as AssocTableDumpBuilder,
+    Table as AssocTable,
+    TableBuilder as AssocTableDumpBuilder,
 };
 
-pub use crate::table::KeyOwned as Key;
+pub(super) use self::assoc::Item as AssocItem;
+
+pub use super::Key as Key;
 
 #[derive(Clone)]
 pub struct Table<V> {
@@ -58,33 +53,29 @@ where V: std::fmt::Debug,
 impl<V> Table<V> {
 
     #[must_use]
-    pub fn dump_iter(&self) -> TableDumpIter<'_, V>
-    {
-        TableDumpIter {
-            array: Some(self.array.iter()),
-            assoc: self.assoc.dump_iter(),
-        }
-    }
-
-    #[must_use]
     pub fn len(&self) -> usize {
         //! May be greater than the actual number of non-nil entries
         usize::checked_add(
-            self.array_len(),
+            u32_to_usize(self.array_len()),
             u32_to_usize(iexp2(self.assoc_loglen())),
         ).unwrap()
     }
 
-    #[must_use]
-    pub fn array_len(&self) -> usize {
-        self.array.len()
+}
+
+impl<V> TableSize for Table<V> {
+    fn array_len(&self) -> u32 {
+        self.array.len().try_into()
+            .expect("the size should fit")
     }
 
-    #[must_use]
-    pub fn assoc_loglen(&self) -> Option<u16> {
+    fn assoc_loglen(&self) -> Option<u16> {
         self.assoc.loglen()
     }
 
+    fn assoc_last_free(&self) -> u32 {
+        self.assoc.last_free()
+    }
 }
 
 pub struct TableArrayBuilder<V> {
@@ -92,6 +83,16 @@ pub struct TableArrayBuilder<V> {
 }
 
 impl<V> TableArrayBuilder<V> {
+
+    #[allow(dead_code)]
+    pub(crate) fn new() -> Self {
+        Self { array: Vec::new() }
+    }
+
+    #[allow(dead_code)]
+    pub fn push(&mut self, value: Option<V>) {
+        self.array.push(value);
+    }
 
     pub fn finish(self) -> Table<V> {
         let Self { array } = self;
@@ -106,78 +107,21 @@ impl<V> FromIterator<Option<V>> for TableArrayBuilder<V> {
     }
 }
 
-pub(crate) struct TableLoadBuilder<V> {
-    array: Vec<Option<V>>,
-    assoc: AssocTableLoadBuilder<V>,
-}
-
-impl<V> TableLoadBuilder<V> {
-
-    #[must_use]
-    pub(crate) fn new(array_len: u32, assoc_loglen: Option<u16>) -> Self {
-        let mut array = Vec::with_capacity(u32_to_usize(array_len));
-        array.resize_with(u32_to_usize(array_len), || None);
-        Self {
-            array,
-            assoc: AssocTableLoadBuilder::new(assoc_loglen),
-        }
-    }
-
-    pub(crate) fn finish<E: load::Error>(self) -> Result<Table<V>, E> {
-        let Self { array, assoc } = self;
-        let assoc = assoc.finish::<E>()?;
-        Ok(Table { array, assoc })
-    }
-
-    pub(crate) fn array_insert<E: load::Error>( &mut self,
-        index: u32, value: V,
-    ) -> Result<(), E> {
-        //! `index` is 0-based
-        #![allow(clippy::unnecessary_wraps)]
-        let index = u32_to_usize(index);
-        let old_value = self.array[index].replace(value);
-        assert!(old_value.is_none());
-        Ok(())
-    }
-
-    pub(crate) fn assoc_insert<E: load::Error>( &mut self,
-        index: u32, item: AssocItem<V>,
-    ) -> Result<(), E> {
-        //! `index` is 0-based
-        match &item {
-            &AssocItem::Live { key: Key::Index(key), .. }
-                if key > 0 && (key as u32) <= (self.array.len() as u32)
-                => return Err(E::from(
-                    "this assoc item should belong to array part" )),
-            _ => (),
-        }
-        self.assoc.insert(index, item);
-        Ok(())
-    }
-
-    pub(crate) fn set_last_free(&mut self, last_free: u32) {
-        self.assoc.set_last_free(last_free)
-    }
-
-}
-
-pub struct TableDumpBuilder<V> {
+/// Table builder facilitating conversion from Rust structures
+pub struct TableBuilder<V> {
     array: Vec<Option<V>>,
     assoc: AssocTableDumpBuilder<V>,
 }
 
-impl<V> TableDumpBuilder<V> {
+impl<V> TableBuilder<V> {
 
     #[must_use]
     pub fn new(
-        array_len: Option<u32>,
+        array_len: u32,
         assoc_loglen: Option<u16>,
     ) -> Self {
         Self {
-            array: match array_len {
-                Some(len) => Vec::with_capacity(u32_to_usize(len)),
-                None => Vec::new(),
-            },
+            array: Vec::with_capacity(u32_to_usize(array_len)),
             assoc: AssocTableDumpBuilder::new(assoc_loglen),
         }
     }
@@ -204,24 +148,23 @@ impl<V> TableDumpBuilder<V> {
 
 }
 
+/// Table builder for the purposes of Deserialize trait
 pub struct TableMapBuilder<V> {
     map: SortedMap<Key, Option<V>>,
-    dead_keys: Vec<Key>,
 }
 
 impl<V> TableMapBuilder<V> {
 
     #[must_use]
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             map: SortedMap::new(),
-            dead_keys: Vec::new(),
         }
     }
 
     #[must_use]
     pub fn finish(self) -> Table<V> {
-        let Self { mut map, dead_keys } = self;
+        let Self { mut map } = self;
         let mut array = Vec::new();
         let max_len = i32::try_from(map.len())
             .unwrap_or(i32::MAX).saturating_mul(2);
@@ -264,19 +207,13 @@ impl<V> TableMapBuilder<V> {
             array_len -= 1;
             map.insert(Key::Index(index), value);
         }
-        let mut table = TableDumpBuilder::new(
-            Some(array.len().try_into().unwrap()),
-            ilog2_ceil(
-                usize::checked_add(map.len(), dead_keys.len())
-                    .unwrap()
-            ),
+        let mut table = TableBuilder::new(
+            array.len().try_into().unwrap(),
+            ilog2_ceil(map.len()),
         );
         table.array_extend(array);
         for (key, value) in map {
             table.assoc_insert(key, value);
-        }
-        for key in dead_keys {
-            table.assoc_insert_dead(key);
         }
         table.finish()
     }
@@ -286,86 +223,6 @@ impl<V> TableMapBuilder<V> {
         assert!(old_value.is_none());
     }
 
-    // pub fn insert_assoc_dead<K: Into<Key>>(&mut self, key: K) {
-    //     self.dead_keys.push(key.into());
-    // }
-
-}
-
-impl<'de, V> serde::de::Visitor<'de> for TableMapBuilder<V>
-where V: Deserialize<'de>
-{
-    type Value = Table<V>;
-
-    fn expecting(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(fmt, "a map or an array")
-    }
-
-    fn visit_seq<A>(mut self, mut seq: A) -> Result<Self::Value, A::Error>
-    where A: serde::de::SeqAccess<'de>
-    {
-        use crate::serde::FlatOption;
-        let mut index = 1;
-        while let Some(value) = seq.next_element::<FlatOption<_>>()? {
-            self.insert(Key::Index(index), value.0);
-            index += 1;
-        }
-        Ok(self.finish())
-    }
-
-    fn visit_map<A>(mut self, mut map: A) -> Result<Self::Value, A::Error>
-    where A: serde::de::MapAccess<'de>
-    {
-        use crate::serde::FlatOption;
-        while let Some((key, value)) =
-            map.next_entry::<Key, FlatOption<_>>()?
-        {
-            self.insert(key, value.0);
-        }
-        Ok(self.finish())
-    }
-
-}
-
-pub struct TableDumpIter<'s, V> {
-    array: Option<std::slice::Iter<'s, Option<V>>>,
-    assoc: assoc::TableDumpIter<'s, V>,
-}
-
-impl<'s, V> Iterator for TableDumpIter<'s, V> {
-    type Item = Option<TableItem<KeyRef<'s>, &'s V>>;
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(item) = self.array.as_mut()
-            .and_then(Iterator::next)
-        {
-            return Some(item.as_ref().map(TableItem::Array));
-        }
-        self.assoc.next()
-    }
-}
-
-impl<'s, V> crate::table::TableSize for TableDumpIter<'s, V> {
-
-    #[must_use]
-    fn array_len(&self) -> u32 {
-        let Some(array) = &self.array else { return 0 };
-        array.len().try_into().unwrap()
-    }
-
-    #[must_use]
-    fn assoc_loglen(&self) -> Option<u16> {
-        self.assoc.loglen()
-    }
-
-    #[must_use]
-    fn assoc_last_free(&self) -> u32 {
-        self.assoc.last_free()
-    }
-}
-
-impl<'s, V: Dump> crate::dump::DumpTableIterator<'s> for TableDumpIter<'s, V> {
-    type Key = KeyRef<'s>;
-    type Value = V;
 }
 
 trait TableItemAdapter {
@@ -443,6 +300,8 @@ impl<V> IntoIterator for Table<V> {
     }
 }
 
+/// Table iterator of (key, value) pairs,
+/// suitable for conversion into a map.
 pub struct TableIntoIter<V> {
     inner: TableChainIter<Key, V,
         std::vec::IntoIter<Option<V>>,
@@ -482,7 +341,7 @@ impl<V> Iterator for TableIntoIter<V> {
 }
 
 impl<'s, V> IntoIterator for &'s Table<V> {
-    type Item = (KeyRef<'s>, &'s V);
+    type Item = (Key, &'s V);
     type IntoIter = TableIter<'s, V>;
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
@@ -499,8 +358,10 @@ impl<V> Table<V> {
     }
 }
 
+/// Table iterator of (key, value) pairs,
+/// suitable for representing as a map.
 pub struct TableIter<'s, V> {
-    inner: TableChainIter<KeyRef<'s>, &'s V,
+    inner: TableChainIter<Key, &'s V,
         std::slice::Iter<'s, Option<V>>,
         assoc::TableIter<'s, V>,
         TableIterAdapter<'s, V> >
@@ -511,13 +372,13 @@ struct TableIterAdapter<'s, V>(PhantomData<&'s V>);
 impl<'s, V> TableItemAdapter for TableIterAdapter<'s, V> {
     type InputArrayItem = &'s Option<V>;
     type InputAssocItem = &'s Option<AssocItem<V>>;
-    type OutputKey = KeyRef<'s>;
+    type OutputKey = Key;
     type OutputValue = &'s V;
 
     #[inline]
     fn adapt_array(index: i32, value: Self::InputArrayItem)
     -> Option<(Self::OutputKey, Self::OutputValue)> {
-        value.as_ref().map(|v| (KeyRef::Index(index), v))
+        value.as_ref().map(|v| (Key::Index(index), v))
     }
 
     #[inline]
@@ -525,13 +386,13 @@ impl<'s, V> TableItemAdapter for TableIterAdapter<'s, V> {
     -> Option<(Self::OutputKey, Self::OutputValue)> {
         let Some(AssocItem::Live { value: Some(value), key, .. }) = item
             else { return None };
-        Some((key.as_ref(), value))
+        Some((key.clone(), value))
     }
 
 }
 
 impl<'s, V> Iterator for TableIter<'s, V> {
-    type Item = (KeyRef<'s>, &'s V);
+    type Item = (Key, &'s V);
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next()
     }
@@ -547,17 +408,26 @@ impl<V> Table<V> {
     }
 }
 
+/// Table iterator of (key, value) pairs,
+/// suitable for serializing as a map.
+/// Outputs keys in a predictable order.
 pub struct TableSortedIter<'s, V> {
-    inner: TableChainIter<KeyRef<'s>, &'s V,
+    inner: TableChainIter<Key, &'s V,
         std::slice::Iter<'s, Option<V>>,
         assoc::TableSortedIter<'s, V>,
         TableIterAdapter<'s, V> >
 }
 
 impl<'s, V> Iterator for TableSortedIter<'s, V> {
-    type Item = (KeyRef<'s>, &'s V);
+    type Item = (Key, &'s V);
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next()
+    }
+}
+
+impl<V> Table<V> {
+    pub fn array_iter(&'_ self) -> std::slice::Iter<'_, Option<V>> {
+        self.array.iter()
     }
 }
 
@@ -705,7 +575,7 @@ impl<V> Table<V> {
     ) -> Result<S, E>
     where
         S: Sequence<V>,
-        F: FnMut(String, V) -> Result<(), E>,
+        F: FnMut(Str, V) -> Result<(), E>,
         EF: FnMut(TableIntoError) -> E,
     {
         let Ok(table_len) = u32::try_from(self.len()) else {
@@ -729,7 +599,7 @@ impl<V> Table<V> {
         err_map: EF,
     ) -> Result<(), E>
     where
-        F: FnMut(String, V) -> Result<(), E>,
+        F: FnMut(Str, V) -> Result<(), E>,
         EF: FnMut(TableIntoError) -> E,
     {
         let _: [_;0] = self.try_into_seq_and_named(consume_name, err_map)?;
@@ -748,29 +618,176 @@ impl<V> TryFrom<Table<V>> for Vec<V> {
     }
 }
 
-impl<V> Serialize for Table<V>
-where V: Serialize
-{
-    fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
-    where S: serde::Serializer
+pub(super) mod load {
+
+use crate::{
+    common::u32_to_usize,
+    load::Error as LoadError,
+};
+
+use super::{
+    Key, AssocItem, Table,
+    assoc::load::TableLoadBuilder as AssocTableLoadBuilder
+};
+
+/// Table builder for the purposes of Load trait
+pub(in super::super) struct TableLoadBuilder<V> {
+    array: Vec<Option<V>>,
+    assoc: AssocTableLoadBuilder<V>,
+}
+
+impl<V> TableLoadBuilder<V> {
+
+    #[must_use]
+    pub(in super::super) fn new(array_len: u32, assoc_loglen: Option<u16>) -> Self {
+        let mut array = Vec::with_capacity(u32_to_usize(array_len));
+        array.resize_with(u32_to_usize(array_len), || None);
+        Self {
+            array,
+            assoc: AssocTableLoadBuilder::new(assoc_loglen),
+        }
+    }
+
+    pub(in super::super) fn finish<E: LoadError>(self) -> Result<Table<V>, E> {
+        let Self { array, assoc } = self;
+        let assoc = assoc.finish::<E>()?;
+        Ok(Table { array, assoc })
+    }
+
+    pub(in super::super) fn array_insert<E: LoadError>( &mut self,
+        index: u32, value: V,
+    ) -> Result<(), E> {
+        //! `index` is 0-based
+        #![allow(clippy::unnecessary_wraps)]
+        let index = u32_to_usize(index);
+        let old_value = self.array[index].replace(value);
+        assert!(old_value.is_none());
+        Ok(())
+    }
+
+    pub(in super::super) fn assoc_insert<E: LoadError>( &mut self,
+        index: u32, item: AssocItem<V>,
+    ) -> Result<(), E> {
+        //! `index` is 0-based
+        match &item {
+            &AssocItem::Live { key: Key::Index(key), .. }
+                if key > 0 && (key as u32) <= (self.array.len() as u32)
+                => return Err(E::from(
+                    "this assoc item should belong to array part" )),
+            _ => (),
+        }
+        self.assoc.insert(index, item);
+        Ok(())
+    }
+
+    pub(in super::super) fn set_assoc_last_free(&mut self, last_free: u32) {
+        self.assoc.set_last_free(last_free)
+    }
+
+}
+
+}
+
+pub(super) mod dump {
+
+use crate::{
+    dump::{Dump, TableDumpIter as TableDumpIterTr},
+    table_iter::{TableItem, TableSize},
+};
+
+use super::{
+    Key, Table,
+    assoc::dump::TableDumpIter as AssocTableDumpIter,
+};
+
+impl<V> Table<V> {
+    #[must_use]
+    pub(in super::super) fn dump_iter(&self) -> TableDumpIter<'_, V>
     {
-        use crate::serde::FlatOption;
-        if self.assoc_loglen().is_none() {
-            ser.collect_seq( self.array.iter()
-                .map(Option::as_ref).map(FlatOption) )
-        } else {
-            ser.collect_map(self.sorted_iter())
+        TableDumpIter {
+            array: Some(self.array.iter()),
+            assoc: self.assoc.dump_iter(),
         }
     }
 }
 
-impl<'de, V> Deserialize<'de> for Table<V>
-where V: Deserialize<'de>
-{
-    fn deserialize<D>(de: D) -> Result<Self, D::Error>
-    where D: serde::Deserializer<'de>
-    {
-        de.deserialize_any(TableMapBuilder::new())
+/// Table iterator for the purposes of Dump trait
+pub(in super::super) struct TableDumpIter<'s, V> {
+    array: Option<std::slice::Iter<'s, Option<V>>>,
+    assoc: AssocTableDumpIter<'s, V>,
+}
+
+impl<'s, V> Clone for TableDumpIter<'s, V> {
+    fn clone(&self) -> Self {
+        Self { array: self.array.clone(), assoc: self.assoc.clone() }
     }
+}
+
+impl<'s, V> TableDumpIter<'s, V> {
+    pub(in super::super) fn take_array(&mut self)
+    -> Option<std::slice::Iter<'s, Option<V>>>
+    {
+        self.array.take()
+    }
+}
+
+impl<'s, V> Iterator for TableDumpIter<'s, V> {
+    type Item = Option<TableItem<Key, &'s V>>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(item) = self.array.as_mut()
+            .and_then(Iterator::next)
+        {
+            return Some(item.as_ref().map(TableItem::Array));
+        }
+        Some(self.assoc.next()?.map(TableItem::Assoc))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = ExactSizeIterator::len(self);
+        (len, Some(len))
+    }
+    fn nth(&mut self, mut n: usize) -> Option<Self::Item> {
+        if let Some(array) = self.array.as_mut() {
+            let array_len = array.len();
+            match array.nth(n) {
+                Some(item) =>
+                    return Some(item.as_ref().map(TableItem::Array)),
+                None => {
+                    self.array = None;
+                    n -= array_len;
+                },
+            }
+        }
+        Some(self.assoc.nth(n)?.map(TableItem::Assoc))
+    }
+}
+
+impl<'s, V> ExactSizeIterator for TableDumpIter<'s, V> {
+    fn len(&self) -> usize {
+        let array_len = self.array.as_ref().map_or(0, ExactSizeIterator::len);
+        let assoc_len =  self.assoc.len();
+        usize::checked_add(array_len, assoc_len).unwrap()
+    }
+}
+
+impl<'s, V> TableSize for TableDumpIter<'s, V> {
+    fn array_len(&self) -> u32 {
+        let Some(array) = &self.array else { return 0 };
+        array.len().try_into().unwrap()
+    }
+    fn assoc_loglen(&self) -> Option<u16> {
+        self.assoc.loglen()
+    }
+    fn assoc_last_free(&self) -> u32 {
+        self.assoc.last_free()
+    }
+}
+
+impl<'s, V> TableDumpIterTr<'s> for TableDumpIter<'s, V>
+where V: Dump
+{
+    type Key = Key;
+    type Value = V;
+}
+
 }
 

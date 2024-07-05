@@ -124,11 +124,11 @@ function getDecodeStyle() {
 }
 
 /**
- * @returns {"struct" | "tree"}
+ * @returns {"struct" | "map_tree" | "table_dump"}
  */
 function getInterRepr() {
     let value = getInputValue("inter_repr");
-    if (!(value == "struct" || value == "tree")) {
+    if (!(value == "struct" || value == "map_tree" || value == "table_dump")) {
         throw new Error("unreachable");
     }
     return value;
@@ -184,11 +184,20 @@ async function main() {
             throw new Error("unreachable");
         }
         state.switchState(() => {
-            return {value: desynced_lib.decode(input.value, {
-                decodeFormat: getDecodeFormat(),
-                decodeStyle: getDecodeStyle(),
-                interRepr: getInterRepr(),
-            })}
+            try {
+                return {value: desynced_lib.decode(input.value, {
+                    decodeFormat: getDecodeFormat(),
+                    decodeStyle: getDecodeStyle(),
+                    interRepr: getInterRepr(),
+                })}
+            } catch (error) {
+                let errors = input_pane.querySelector('.errors');
+                if (errors == null) {
+                    throw new Error("unreachable");
+                }
+                errors.innerHTML = error;
+                throw error;
+            }
         }, "encoded", "decoded")
     }
     function encode() {
@@ -201,10 +210,19 @@ async function main() {
             throw new Error("unreachable");
         }
         state.switchState(() => {
-            return {value: desynced_lib.encode(input.value, {
-                decodeFormat: getDecodeFormat(),
-                interRepr: getInterRepr(),
-            })}
+            try {
+                return {value: desynced_lib.encode(input.value, {
+                    decodeFormat: getDecodeFormat(),
+                    interRepr: getInterRepr(),
+                })}
+            } catch (error) {
+                let errors = input_pane.querySelector('.errors');
+                if (errors == null) {
+                    throw new Error("unreachable");
+                }
+                errors.innerHTML = error;
+                throw error;
+            }
         }, "decoded", "encoded")
     }
     document.querySelectorAll("button[data-action=go_to_decoded]").forEach(

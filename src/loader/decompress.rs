@@ -3,15 +3,13 @@ use std::io::Read;
 use flate2::read::ZlibDecoder as UnZippingReader;
 
 use crate::{
-    Exchange,
+    error::LoadError as Error,
     ascii::{Ascii, AsciiStr},
-    intlim::{Int62, Int31, decode_base62}, table::u32_to_usize,
+    intlim::{Int62, Int31, decode_base62},
+    Exchange,
 };
 
-use super::{
-    error::Error,
-    reader::AsciiReader,
-};
+use super::reader::AsciiReader;
 
 #[cold]
 fn error_eof() -> Error {
@@ -71,10 +69,9 @@ fn read_len_base31(reader: &mut AsciiReader) -> Result<usize, Error> {
         }
     }
     let end = MAX_DIGITS - digits_mut.len();
-    Ok(u32_to_usize(
-        Int31::be_compose(&digits[..end])
+    Ok( Int31::be_compose(&digits[..end])
             .map_err(|_err| Error::from("encoded length is too large"))?
-    ))
+        as usize )
 }
 
 fn unzip(data: &[u8]) -> Result<Vec<u8>, Error> {

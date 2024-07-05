@@ -1,10 +1,10 @@
 //! Associative part of the tables
 
 use crate::{
-    table::{ilog2_exact, iexp2, u32_to_usize},
-    load,
+    common::{ilog2_exact, iexp2, u32_to_usize},
+    load::Error as LoadError,
 };
-use super::{Key, KeyRef};
+use super::Key;
 
 #[inline]
 const fn mask(loglen: u16) -> u32 {
@@ -46,22 +46,15 @@ pub(crate) const fn int_table_hash(value: i32, loglen: u16) -> u32 {
     }
 }
 
-pub(crate) type Item<V> = crate::table::AssocItem<Key, V>;
-
-impl<'s> KeyRef<'s> {
-    #[inline]
-    fn position(self, loglen: u16) -> u32 {
-        match self {
-            Self::Index(index) => int_table_hash(index, loglen),
-            Self::Name(value) => str_table_hash(value) & mask(loglen),
-        }
-    }
-}
+pub(crate) type Item<V> = crate::table_iter::AssocItem<Key, V>;
 
 impl Key {
     #[inline]
     fn position(&self, loglen: u16) -> u32 {
-        self.as_ref().position(loglen)
+        match *self {
+            Self::Index(index) => int_table_hash(index, loglen),
+            Self::Name(ref value) => str_table_hash(value) & mask(loglen),
+        }
     }
 }
 
@@ -128,32 +121,30 @@ impl<V> Table<V> {
     pub fn last_free(&self) -> u32 {
         self.last_free
     }
-    pub fn dump_iter(&self) -> TableDumpIter<'_, V> {
-        TableDumpIter {
-            items: self.items.as_ref().map_or_else(
-                Default::default,
-                |items| items.iter() ),
-            loglen: self.loglen(),
-            last_free: self.last_free(),
-        }
-    }
 }
 
 impl<V> Table<V> {
-    fn validate_positions<E: load::Error>(&self) -> Result<(), E> {
+    fn validate_positions<E: LoadError>(&self) -> Result<(), E> {
         let Some(items) = self.items.as_deref() else {
             return Ok(());
         };
         // SAFETY: `items` has a size of a power of two
         let loglen = unsafe { ilog2_exact(items.len()).unwrap_unchecked() };
         let len = iexp2(Some(loglen));
-        let mut unvalidated: Vec<Option<u32>> = items.iter().map( |item| {
-            let item = item.as_ref()?;
-            item.main_position(loglen)
-        }).collect();
+        let mut unvalidated: Vec<Option<u32>> = items.iter()
+            .enumerate().map( |(index, item)| {
+                let index: u32 = index.try_into().unwrap();
+                let item = item.as_ref()?;
+                Some(item.main_position(loglen).unwrap_or(index))
+            }).collect();
         for main_position in 0 .. len {
             let mut position = main_position;
             let mut steps = 0;
+            if unvalidated[u32_to_usize(position)] != Some(position) {
+                // chain start is not in its main position, which means
+                // that no elements can have this position as main position.
+                continue;
+            }
             loop {
                 let index = u32_to_usize(position);
                 if unvalidated[index] == Some(main_position) {
@@ -190,160 +181,6 @@ impl<V> Table<V> {
     }
 }
 
-pub(super) struct TableDumpIter<'s, V> {
-    items: std::slice::Iter<'s, Option<Item<V>>>,
-    loglen: Option<u16>,
-    last_free: u32,
-}
-
-impl<'s, V> TableDumpIter<'s, V> {
-    pub(super) fn loglen(&self) -> Option<u16> {
-        self.loglen
-    }
-    pub(super) fn last_free(&self) -> u32 {
-        self.last_free
-    }
-}
-
-impl<'s, V> Iterator for TableDumpIter<'s, V> {
-    type Item = Option<super::TableItem<KeyRef<'s>, &'s V>>;
-    fn next(&mut self) -> Option<Self::Item> {
-        use std::convert::identity;
-        let item = self.items.next()?;
-        let Some(item) = item.as_ref() else {
-            return Some(None)
-        };
-        Some(Some(super::TableItem::Assoc(
-            item.as_ref().map_key_value(Key::as_ref, identity)
-        )))
-    }
-}
-
-impl<V> IntoIterator for Table<V> {
-    type Item = Option<Item<V>>;
-    type IntoIter = TableIntoIter<V>;
-    fn into_iter(self) -> Self::IntoIter {
-        let items = self.items.map(Vec::from).map(Vec::into_iter);
-        TableIntoIter { items }
-    }
-}
-
-pub(super) struct TableIntoIter<V> {
-    items: Option<std::vec::IntoIter<Option<Item<V>>>>,
-}
-
-impl<V> Iterator for TableIntoIter<V> {
-    type Item = Option<Item<V>>;
-    fn next(&mut self) -> Option<Self::Item> {
-        self.items.as_mut().and_then(Iterator::next)
-    }
-}
-
-impl<'s, V> IntoIterator for &'s Table<V> {
-    type Item = &'s Option<Item<V>>;
-    type IntoIter = TableIter<'s, V>;
-    fn into_iter(self) -> Self::IntoIter {
-        let items = self.items.as_ref().map(Box::as_ref).map(<[_]>::iter);
-        TableIter { items }
-    }
-}
-
-impl<V> Table<V> {
-    pub fn iter(&'_ self) -> TableIter<'_, V> {
-        <&Self as IntoIterator>::into_iter(self)
-    }
-}
-
-pub(super) struct TableIter<'s, V> {
-    items: Option<std::slice::Iter<'s, Option<Item<V>>>>,
-}
-
-impl<'s, V> Iterator for TableIter<'s, V> {
-    type Item = &'s Option<Item<V>>;
-    fn next(&mut self) -> Option<Self::Item> {
-        self.items.as_mut().and_then(Iterator::next)
-    }
-}
-
-impl<V> Table<V> {
-    pub fn sorted_iter(&'_ self) -> TableSortedIter<'_, V> {
-        TableSortedIter { state: TableSortedIterState::Table(self) }
-    }
-}
-
-pub(super) struct TableSortedIter<'s, V> {
-    state: TableSortedIterState<'s, V>,
-}
-
-pub(super) enum TableSortedIterState<'s, V> {
-    Table(&'s Table<V>),
-    Items(std::vec::IntoIter<&'s Option<Item<V>>>),
-}
-
-impl<'s, V> Iterator for TableSortedIter<'s, V> {
-    type Item = &'s Option<Item<V>>;
-    fn next(&mut self) -> Option<Self::Item> {
-        use TableSortedIterState as State;
-        match self.state {
-            State::Items(ref mut items) => items,
-            State::Table(table) => {
-                let mut items: Vec<_> = table.iter().collect();
-                items.sort_unstable_by_key( |&item_opt|
-                    item_opt.as_ref().and_then(|item| match item {
-                        Item::Dead { .. } => None,
-                        Item::Live { key, .. }
-                            => Some(key),
-                    })
-                );
-                self.state = State::Items(items.into_iter());
-                #[allow(clippy::shadow_unrelated)]
-                let State::Items(ref mut items) = &mut self.state else {
-                    unreachable!()
-                };
-                items
-            },
-        }.next()
-    }
-}
-
-pub(super) struct TableLoadBuilder<V> {
-    table: Table<V>,
-}
-
-impl<V> TableLoadBuilder<V> {
-
-    pub(super) fn new(loglen: Option<u16>) -> Self {
-        Self { table: Table::new(loglen) }
-    }
-
-    pub(super) fn finish<E: load::Error>(self) -> Result<Table<V>, E> {
-        #[allow(clippy::assertions_on_constants)]
-        { assert!(u32::BITS <= usize::BITS); }
-        if self.table.len() > u32::MAX as usize {
-            return Err(E::from(
-                "the table should not be that large" ));
-        }
-        if self.table.last_free > self.table.len() as u32 {
-            return Err(E::from(
-                "last free index should not exceed table size" ));
-        }
-        self.table.validate_positions::<E>()?;
-        Ok(self.table)
-    }
-
-    pub(super) fn insert(&mut self, index: u32, item: Item<V>) {
-        let items = self.table.items.as_mut().unwrap();
-        let index = u32_to_usize(index);
-        let old_item = items[index].replace(item);
-        assert!(old_item.is_none());
-    }
-
-    pub(super) fn set_last_free(&mut self, last_free: u32) {
-        self.table.last_free = last_free;
-    }
-
-}
-
 enum InsertItem<V> {
     Dead { position: u32 },
     Live { key: Key, value: Option<V> },
@@ -351,7 +188,7 @@ enum InsertItem<V> {
 
 impl<V> InsertItem<V> {
     #[inline]
-    fn dead_from_key(key: KeyRef<'_>, loglen: u16) -> Self {
+    fn dead_from_key(key: Key, loglen: u16) -> Self {
         Self::Dead { position: key.position(loglen) }
     }
     #[inline]
@@ -370,11 +207,12 @@ impl<V> InsertItem<V> {
     }
 }
 
-pub(super) struct TableDumpBuilder<V> {
+/// Table builder facilitating conversion from Rust structures
+pub(super) struct TableBuilder<V> {
     table: Table<V>,
 }
 
-impl<V> TableDumpBuilder<V> {
+impl<V> TableBuilder<V> {
 
     pub(super) fn new(loglen: Option<u16>) -> Self {
         Self { table: Table::new(loglen) }
@@ -389,7 +227,7 @@ impl<V> TableDumpBuilder<V> {
     }
 
     pub(super) fn insert_dead(&mut self, key: Key) {
-        self.insert_item(InsertItem::dead_from_key( key.as_ref(),
+        self.insert_item(InsertItem::dead_from_key( key.clone(),
             self.table.loglen().unwrap() ))
     }
 
@@ -472,6 +310,220 @@ impl<V> TableDumpBuilder<V> {
 
 }
 
+impl<V> IntoIterator for Table<V> {
+    type Item = Option<Item<V>>;
+    type IntoIter = TableIntoIter<V>;
+    fn into_iter(self) -> Self::IntoIter {
+        let items = self.items.map(Vec::from).map(Vec::into_iter);
+        TableIntoIter { items }
+    }
+}
+
+/// Table iterator of (key, value) pairs,
+/// suitable for conversion into a map.
+pub(super) struct TableIntoIter<V> {
+    items: Option<std::vec::IntoIter<Option<Item<V>>>>,
+}
+
+impl<V> Iterator for TableIntoIter<V> {
+    type Item = Option<Item<V>>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.items.as_mut().and_then(Iterator::next)
+    }
+}
+
+impl<'s, V> IntoIterator for &'s Table<V> {
+    type Item = &'s Option<Item<V>>;
+    type IntoIter = TableIter<'s, V>;
+    fn into_iter(self) -> Self::IntoIter {
+        let items = self.items.as_ref().map(Box::as_ref).map(<[_]>::iter);
+        TableIter { items }
+    }
+}
+
+impl<V> Table<V> {
+    pub fn iter(&'_ self) -> TableIter<'_, V> {
+        <&Self as IntoIterator>::into_iter(self)
+    }
+}
+
+/// Table iterator of (key, value) pairs,
+/// suitable for representing as a map.
+pub(super) struct TableIter<'s, V> {
+    items: Option<std::slice::Iter<'s, Option<Item<V>>>>,
+}
+
+impl<'s, V> Iterator for TableIter<'s, V> {
+    type Item = &'s Option<Item<V>>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.items.as_mut().and_then(Iterator::next)
+    }
+}
+
+impl<V> Table<V> {
+    pub fn sorted_iter(&'_ self) -> TableSortedIter<'_, V> {
+        TableSortedIter { state: TableSortedIterState::Table(self) }
+    }
+}
+
+/// Table iterator of (key, value) pairs,
+/// suitable for serializing as a map.
+/// Outputs keys in a predictable order.
+pub(super) struct TableSortedIter<'s, V> {
+    state: TableSortedIterState<'s, V>,
+}
+
+pub(super) enum TableSortedIterState<'s, V> {
+    Table(&'s Table<V>),
+    Items(std::vec::IntoIter<&'s Option<Item<V>>>),
+}
+
+impl<'s, V> Iterator for TableSortedIter<'s, V> {
+    type Item = &'s Option<Item<V>>;
+    fn next(&mut self) -> Option<Self::Item> {
+        use TableSortedIterState as State;
+        match self.state {
+            State::Items(ref mut items) => items,
+            State::Table(table) => {
+                let mut items: Vec<_> = table.iter().collect();
+                items.sort_unstable_by_key( |&item_opt|
+                    item_opt.as_ref().and_then(|item| match item {
+                        Item::Dead { .. } => None,
+                        Item::Live { key, .. }
+                            => Some(key),
+                    })
+                );
+                self.state = State::Items(items.into_iter());
+                #[allow(clippy::shadow_unrelated)]
+                let State::Items(ref mut items) = &mut self.state else {
+                    unreachable!()
+                };
+                items
+            },
+        }.next()
+    }
+}
+
+pub(super) mod load {
+
+use crate::{
+    common::u32_to_usize,
+    load::Error,
+};
+
+use super::{Item, Table};
+
+/// Table builder for the purposes of Load trait
+pub(in super::super) struct TableLoadBuilder<V> {
+    table: Table<V>,
+}
+
+impl<V> TableLoadBuilder<V> {
+
+    pub(in super::super) fn new(loglen: Option<u16>) -> Self {
+        Self { table: Table::new(loglen) }
+    }
+
+    pub(in super::super) fn finish<E: Error>(self)
+    -> Result<Table<V>, E>
+    {
+        #[allow(clippy::assertions_on_constants)]
+        { assert!(u32::BITS <= usize::BITS); }
+        if self.table.len() > u32::MAX as usize {
+            return Err(E::from(
+                "the table should not be that large" ));
+        }
+        if self.table.last_free > self.table.len() as u32 {
+            return Err(E::from(
+                "last free index should not exceed table size" ));
+        }
+        self.table.validate_positions::<E>()?;
+        Ok(self.table)
+    }
+
+    pub(in super::super) fn insert(&mut self, index: u32, item: Item<V>) {
+        let items = self.table.items.as_mut().unwrap();
+        let index = u32_to_usize(index);
+        let old_item = items[index].replace(item);
+        assert!(old_item.is_none());
+    }
+
+    pub(in super::super) fn set_last_free(&mut self, last_free: u32) {
+        self.table.last_free = last_free;
+    }
+
+}
+
+}
+
+pub(super) mod dump {
+
+use super::{Item, Table};
+
+impl<V> Table<V> {
+    pub(in super::super) fn dump_iter(&self) -> TableDumpIter<'_, V> {
+        TableDumpIter {
+            items: self.items.as_ref().map_or_else(
+                Default::default,
+                |items| items.iter() ),
+            loglen: self.loglen(),
+            last_free: self.last_free(),
+        }
+    }
+}
+
+pub(in super::super) struct TableDumpIter<'s, V> {
+    items: std::slice::Iter<'s, Option<Item<V>>>,
+    loglen: Option<u16>,
+    last_free: u32,
+}
+
+impl<'s, V> Clone for TableDumpIter<'s, V> {
+    fn clone(&self) -> Self {
+        Self {
+            items: self.items.clone(),
+            loglen: self.loglen,
+            last_free: self.last_free,
+        }
+    }
+}
+
+impl<'s, V> TableDumpIter<'s, V> {
+    pub(crate) fn loglen(&self) -> Option<u16> {
+        self.loglen
+    }
+    pub(crate) fn last_free(&self) -> u32 {
+        self.last_free
+    }
+    #[inline]
+    fn convert_item(item: &Option<Item<V>>) -> Option<Item<&V>> {
+        item.as_ref().map(Item::as_value_ref)
+    }
+}
+
+impl<'s, V> Iterator for TableDumpIter<'s, V> {
+    type Item = Option<Item<&'s V>>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let item = self.items.next()?;
+        Some(Self::convert_item(item))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        Some(Self::convert_item(self.items.nth(n)?))
+    }
+}
+
+impl<'s, V> ExactSizeIterator for TableDumpIter<'s, V> {
+    fn len(&self) -> usize {
+        self.items.len()
+    }
+}
+
+}
+
 #[cfg(test)]
 mod test {
 #![allow(clippy::string_slice)]
@@ -480,23 +532,24 @@ mod test {
 use std::slice;
 
 use crate::{
-    table::ilog2_ceil,
-    load::error::Error as LoadError,
+    error::LoadError,
+    common::ilog2_ceil,
+    string::Str,
 };
 
 use super::Key;
 
-use super::TableDumpBuilder;
+use super::TableBuilder;
 
 fn test_positions_for_keys_with_len<S>(
     keys: impl Iterator<Item=S>,
     loglen: Option<u16>,
 )
-where String: From<S>,
+where Str: From<S>,
 {
-    let mut table = TableDumpBuilder::<()>::new(loglen);
+    let mut table = TableBuilder::<()>::new(loglen);
     for key in keys {
-        table.insert(Key::Name(String::from(key)), None);
+        table.insert(Key::Name(Str::from(key)), None);
     }
     let table = table.finish();
     let err = table.validate_positions::<LoadError>();
@@ -509,7 +562,7 @@ where String: From<S>,
 fn test_positions_for_keys<S>(
     keys: impl ExactSizeIterator<Item=S>,
 )
-where String: From<S>,
+where Str: From<S>,
 {
     let loglen = ilog2_ceil(keys.len());
     test_positions_for_keys_with_len(keys, loglen)
@@ -518,7 +571,7 @@ where String: From<S>,
 fn test_positions_spacious_for_keys<S>(
     keys: impl ExactSizeIterator<Item=S>,
 )
-where String: From<S>,
+where Str: From<S>,
 {
     let loglen = ilog2_ceil(2*keys.len());
     test_positions_for_keys_with_len(keys, loglen)

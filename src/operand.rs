@@ -8,8 +8,13 @@ use serde::{
 };
 
 use crate::{
-    load::error::Error as LoadError,
-    value::{self as v, Key, TableIntoError as TableError},
+    error::LoadError,
+    string::Str,
+    value::{
+        TableIntoError as TableError,
+        Key, Value,
+        Table, TableBuilder,
+    },
 };
 
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -40,8 +45,8 @@ pub enum Operand {
     Place(Option<Place>),
 
     #[serde( untagged,
-        serialize_with="Value::serialize_option" )]
-    Value(Option<Value>),
+        serialize_with="OpValue::serialize_option" )]
+    Value(Option<OpValue>),
 
 }
 
@@ -138,18 +143,18 @@ impl<'de> serde::de::Visitor<'de> for OperandVisitor {
                 Operand::Value(None) },
             T::Number => {
                 let count = contents.newtype_variant()?;
-                Operand::Value(Some(Value::Number(count))) },
+                Operand::Value(Some(OpValue::Number(count))) },
             T::Item => {
                 let id = contents.newtype_variant()?;
-                Operand::Value(Some(Value::Item(id))) },
+                Operand::Value(Some(OpValue::Item(id))) },
             T::ItemCount => {
                 let (id, count) = contents.tuple_variant(2, PairVisitor::new())?;
-                Operand::Value(Some(Value::ItemCount(id, count))) },
+                Operand::Value(Some(OpValue::ItemCount(id, count))) },
             T::Coord => { let coord = contents.newtype_variant()?;
-                Operand::Value(Some(Value::Coord(coord))) },
+                Operand::Value(Some(OpValue::Coord(coord))) },
             T::CoordCount => {
                 let (coord, count) = contents.tuple_variant(2, PairVisitor::new())?;
-                Operand::Value(Some(Value::CoordCount(coord, count))) },
+                Operand::Value(Some(OpValue::CoordCount(coord, count))) },
         })
     }
 }
@@ -188,34 +193,34 @@ impl<'de> Deserialize<'de> for Operand {
     }
 }
 
-impl TryFrom<Option<v::Value>> for Operand {
+impl TryFrom<Option<Value>> for Operand {
     type Error = LoadError;
-    fn try_from(value: Option<v::Value>) -> Result<Operand, Self::Error> {
+    fn try_from(value: Option<Value>) -> Result<Operand, Self::Error> {
         Ok(Operand::unwrap_option(
             value.map(Operand::try_from).transpose()?
         ))
     }
 }
 
-impl TryFrom<v::Value> for Operand {
+impl TryFrom<Value> for Operand {
     type Error = LoadError;
-    fn try_from(value: v::Value) -> Result<Operand, Self::Error> {
+    fn try_from(value: Value) -> Result<Operand, Self::Error> {
         Ok(match value {
-            v::Value::Boolean(false) => Operand::UnknownSkipped,
-            v::Value::Integer(index @ 1 ..= i32::MAX) =>
+            Value::Boolean(false) => Operand::UnknownSkipped,
+            Value::Integer(index @ 1 ..= i32::MAX) =>
                 Operand::UnknownIndex(index),
-            v::Value::Integer(index @ -4 ..= -1) =>
+            Value::Integer(index @ -4 ..= -1) =>
                 Operand::Place(Some(Place::Register(
                     Register::try_from(index)? ))),
-            v::Value::String(name) =>
+            Value::String(name) =>
                 Operand::Place(Some( Place::Variable(name) )),
-            v::Value::Table(table) => Operand::Value(Some(
-                Value::try_from(table)? )),
-            v::Value::Float(_) => return Err(LoadError::from(
+            Value::Table(table) => Operand::Value(Some(
+                OpValue::try_from(table)? )),
+            Value::Float(_) => return Err(LoadError::from(
                 "operand cannot be a float" )),
-            v::Value::Boolean(true) => return Err(LoadError::from(
+            Value::Boolean(true) => return Err(LoadError::from(
                 "operand cannot be `true`" )),
-            v::Value::Integer(i32::MIN ..= 0) =>
+            Value::Integer(i32::MIN ..= 0) =>
                 return Err(LoadError::from(
                     "operand cannot be a negative number \
                      except for register codes" )),
@@ -223,17 +228,17 @@ impl TryFrom<v::Value> for Operand {
     }
 }
 
-impl From<Operand> for Option<v::Value> {
-    fn from(this: Operand) -> Option<v::Value> {
+impl From<Operand> for Option<Value> {
+    fn from(this: Operand) -> Option<Value> {
         match this {
-            Operand::Jump(index) => Option::<v::Value>::from(index),
-            Operand::Place(Some(place)) => Some(v::Value::from(place)),
-            Operand::Value(Some(value)) => Some(v::Value::from(value)),
+            Operand::Jump(index) => Option::<Value>::from(index),
+            Operand::Place(Some(place)) => Some(Value::from(place)),
+            Operand::Value(Some(value)) => Some(Value::from(value)),
             Operand::UnknownUnset => None,
             Operand::UnknownSkipped |
             Operand::Place(None) | Operand::Value(None)
-                => Some(v::Value::Boolean(false)),
-            Operand::UnknownIndex(index) => Some(v::Value::Integer(index)),
+                => Some(Value::Boolean(false)),
+            Operand::UnknownIndex(index) => Some(Value::Integer(index)),
         }
     }
 }
@@ -254,20 +259,20 @@ impl Jump {
     }
 }
 
-impl TryFrom<Option<v::Value>> for Jump {
+impl TryFrom<Option<Value>> for Jump {
     type Error = LoadError;
-    fn try_from(value: Option<v::Value>) -> Result<Jump, Self::Error> {
+    fn try_from(value: Option<Value>) -> Result<Jump, Self::Error> {
         Ok(Jump::unwrap_option(
             value.map(Jump::try_from).transpose()? ))
     }
 }
 
-impl TryFrom<v::Value> for Jump {
+impl TryFrom<Value> for Jump {
     type Error = LoadError;
-    fn try_from(value: v::Value) -> Result<Jump, Self::Error> {
+    fn try_from(value: Value) -> Result<Jump, Self::Error> {
         Ok(match value {
-            v::Value::Boolean(false) => Jump::Return,
-            v::Value::Integer(index) if index > 0 => Jump::Jump(index),
+            Value::Boolean(false) => Jump::Return,
+            Value::Integer(index) if index > 0 => Jump::Jump(index),
             _ => return Err(LoadError::from(
                 "instruction jump reference should be either `false` or
                  a positive integer" ))
@@ -275,12 +280,12 @@ impl TryFrom<v::Value> for Jump {
     }
 }
 
-impl From<Jump> for Option<v::Value> {
-    fn from(this: Jump) -> Option<v::Value> {
+impl From<Jump> for Option<Value> {
+    fn from(this: Jump) -> Option<Value> {
         match this {
-            Jump::Jump(index) => Some(v::Value::Integer(index)),
+            Jump::Jump(index) => Some(Value::Integer(index)),
             Jump::Next => None,
-            Jump::Return => Some(v::Value::Boolean(false)),
+            Jump::Return => Some(Value::Boolean(false)),
         }
     }
 }
@@ -290,7 +295,7 @@ impl From<Jump> for Option<v::Value> {
 pub enum Place {
     Parameter(i32),
     Register(Register),
-    Variable(String),
+    Variable(Str),
 }
 
 mod serde_option_place {
@@ -309,13 +314,13 @@ mod serde_option_place {
     }
 }
 
-impl TryFrom<v::Value> for Place {
+impl TryFrom<Value> for Place {
     type Error = LoadError;
-    fn try_from(value: v::Value) -> Result<Place, Self::Error> {
+    fn try_from(value: Value) -> Result<Place, Self::Error> {
         Ok(match value {
-            v::Value::Integer(index) =>
+            Value::Integer(index) =>
                 return Place::try_from(index),
-            v::Value::String(name) => Place::Variable(name),
+            Value::String(name) => Place::Variable(name),
             _ => return Err(LoadError::from(
                 "operand should be a string or an integer" )),
     })
@@ -335,12 +340,12 @@ impl TryFrom<i32> for Place {
     }
 }
 
-impl From<Place> for v::Value {
-    fn from(this: Place) -> v::Value {
+impl From<Place> for Value {
+    fn from(this: Place) -> Value {
         match this {
-            Place::Parameter(index) => v::Value::Integer(index),
-            Place::Register(register) => v::Value::from(register),
-            Place::Variable(name) => v::Value::String(name),
+            Place::Parameter(index) => Value::Integer(index),
+            Place::Register(register) => Value::from(register),
+            Place::Variable(name) => Value::String(name),
         }
     }
 }
@@ -354,11 +359,11 @@ pub enum Register {
     Goto   = -1,
 }
 
-impl TryFrom<v::Value> for Register {
+impl TryFrom<Value> for Register {
     type Error = LoadError;
-    fn try_from(value: v::Value) -> Result<Register, Self::Error> {
+    fn try_from(value: Value) -> Result<Register, Self::Error> {
         Ok(match value {
-            v::Value::Integer(index) => Register::try_from(index)?,
+            Value::Integer(index) => Register::try_from(index)?,
             _ => return Err(LoadError::from(
                 "register should be encoded by an integer" )),
         })
@@ -381,24 +386,24 @@ impl TryFrom<i32> for Register {
     }
 }
 
-impl From<Register> for v::Value {
-    fn from(this: Register) -> v::Value {
-        v::Value::Integer(this as i32)
+impl From<Register> for Value {
+    fn from(this: Register) -> Value {
+        Value::Integer(this as i32)
     }
 }
 
 /// Value arguments to operations
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub enum Value {
+pub enum OpValue {
     Number(i32),
-    Item(String),
-    ItemCount(String, i32),
+    Item(Str),
+    ItemCount(Str, i32),
     Coord(Coord),
     CoordCount(Coord, i32),
 }
 
-impl Value {
-    fn serialize_option<S>(this: &Option<Value>, ser: S)
+impl OpValue {
+    fn serialize_option<S>(this: &Option<OpValue>, ser: S)
     -> Result<S::Ok, S::Error>
     where S: serde::Serializer {
         let Some(this) = this else {
@@ -410,20 +415,20 @@ impl Value {
     }
 }
 
-impl TryFrom<v::Value> for Value {
+impl TryFrom<Value> for OpValue {
     type Error = LoadError;
-    fn try_from(value: v::Value) -> Result<Value, Self::Error> {
-        let v::Value::Table(table) = value else {
+    fn try_from(value: Value) -> Result<OpValue, Self::Error> {
+        let Value::Table(table) = value else {
             return Err(LoadError::from(
                 "value operand should be represented by a table value" ));
         };
-        Value::try_from(table)
+        OpValue::try_from(table)
     }
 }
 
-impl TryFrom<v::Table> for Value {
+impl TryFrom<Table> for OpValue {
     type Error = LoadError;
-    fn try_from(table: v::Table) -> Result<Value, Self::Error> {
+    fn try_from(table: Table) -> Result<OpValue, Self::Error> {
         fn err_from_table_index(error: TableError) -> LoadError {
             match error {
                 TableError::NonContinuous(index) =>
@@ -434,21 +439,21 @@ impl TryFrom<v::Table> for Value {
         }
         fn err_unexpected_key(key: Key) -> LoadError { LoadError::from(format!(
             "value representation should not have {key:?} key" )) }
-        fn id_ok(value: v::Value) -> Result<String, LoadError> {
+        fn id_ok(value: Value) -> Result<Str, LoadError> {
             match value {
-                v::Value::String(id) => Ok(id),
+                Value::String(id) => Ok(id),
                 _ => Err(LoadError::from("`id` value should be string")),
             }
         }
-        fn num_ok(value: v::Value) -> Result<i32, LoadError> {
+        fn num_ok(value: Value) -> Result<i32, LoadError> {
             match value {
-                v::Value::Integer(num) => Ok(num),
+                Value::Integer(num) => Ok(num),
                 _ => Err(LoadError::from("`num` value should be integer")),
             }
         }
         let (mut id, mut coord, mut num) = (None, None, None);
         table.try_into_named(
-            |name, value| { match name.as_str() {
+            |name, value| { match name.as_ref() {
                 "id" => id = Some(id_ok(value)?),
                 "coord" => coord = Some(Coord::try_from(value)?),
                 "num" => num = Some(num_ok(value)?),
@@ -456,11 +461,11 @@ impl TryFrom<v::Table> for Value {
             }; Ok(()) },
             err_from_table_index )?;
         Ok(match (id, coord, num) {
-            (None, None, Some(num)) => Value::Number(num),
-            (Some(id), None, None) => Value::Item(id),
-            (Some(id), None, Some(num)) => Value::ItemCount(id, num),
-            (None, Some(coord), None) => Value::Coord(coord),
-            (None, Some(coord), Some(num)) => Value::CoordCount(coord, num),
+            (None, None, Some(num)) => OpValue::Number(num),
+            (Some(id), None, None) => OpValue::Item(id),
+            (Some(id), None, Some(num)) => OpValue::ItemCount(id, num),
+            (None, Some(coord), None) => OpValue::Coord(coord),
+            (None, Some(coord), Some(num)) => OpValue::CoordCount(coord, num),
             (None, None, None) => return Err(LoadError::from(
                 "value representation should have at least one of the fields\
                  `id`, `coord`, `num`" )),
@@ -471,35 +476,35 @@ impl TryFrom<v::Table> for Value {
     }
 }
 
-impl From<Value> for v::Value {
-    fn from(this: Value) -> v::Value {
+impl From<OpValue> for Value {
+    fn from(this: OpValue) -> Value {
         match this {
-            Value::Number(number) => {
-                let mut table = v::TableDumpBuilder::new(Some(0), Some(0));
-                table.assoc_insert("num", Some(v::Value::Integer(number)));
-                v::Value::Table(table.finish())
+            OpValue::Number(number) => {
+                let mut table = TableBuilder::new(0, Some(0));
+                table.assoc_insert("num", Some(Value::Integer(number)));
+                Value::Table(table.finish())
             },
-            Value::Coord(coord) | Value::CoordCount(coord, 0) => {
-                let mut table = v::TableDumpBuilder::new(Some(0), Some(0));
-                table.assoc_insert("coord", Some(v::Value::from(coord)));
-                v::Value::Table(table.finish())
+            OpValue::Coord(coord) | OpValue::CoordCount(coord, 0) => {
+                let mut table = TableBuilder::new(0, Some(0));
+                table.assoc_insert("coord", Some(Value::from(coord)));
+                Value::Table(table.finish())
             },
-            Value::CoordCount(coord, num) => {
-                let mut table = v::TableDumpBuilder::new(Some(0), Some(1));
-                table.assoc_insert("coord", Some(v::Value::from(coord)));
-                table.assoc_insert("num", Some(v::Value::Integer(num)));
-                v::Value::Table(table.finish())
+            OpValue::CoordCount(coord, num) => {
+                let mut table = TableBuilder::new(0, Some(1));
+                table.assoc_insert("coord", Some(Value::from(coord)));
+                table.assoc_insert("num", Some(Value::Integer(num)));
+                Value::Table(table.finish())
             },
-            Value::Item(id) | Value::ItemCount(id, 0) => {
-                let mut table = v::TableDumpBuilder::new(Some(0), Some(0));
-                table.assoc_insert("id", Some(v::Value::String(id)));
-                v::Value::Table(table.finish())
+            OpValue::Item(id) | OpValue::ItemCount(id, 0) => {
+                let mut table = TableBuilder::new(0, Some(0));
+                table.assoc_insert("id", Some(Value::String(id)));
+                Value::Table(table.finish())
             },
-            Value::ItemCount(id, num) => {
-                let mut table = v::TableDumpBuilder::new(Some(0), Some(1));
-                table.assoc_insert("id", Some(v::Value::String(id)));
-                table.assoc_insert("num", Some(v::Value::Integer(num)));
-                v::Value::Table(table.finish())
+            OpValue::ItemCount(id, num) => {
+                let mut table = TableBuilder::new(0, Some(1));
+                table.assoc_insert("id", Some(Value::String(id)));
+                table.assoc_insert("num", Some(Value::Integer(num)));
+                Value::Table(table.finish())
             },
         }
     }
@@ -511,10 +516,10 @@ pub struct Coord {
     pub y: i32,
 }
 
-impl TryFrom<v::Value> for Coord {
+impl TryFrom<Value> for Coord {
     type Error = LoadError;
-    fn try_from(value: v::Value) -> Result<Coord, Self::Error> {
-        let v::Value::Table(table) = value else {
+    fn try_from(value: Value) -> Result<Coord, Self::Error> {
+        let Value::Table(table) = value else {
             return Err(LoadError::from(
                 "coord should be represented by a table value" ));
         };
@@ -522,9 +527,9 @@ impl TryFrom<v::Value> for Coord {
     }
 }
 
-impl TryFrom<v::Table> for Coord {
+impl TryFrom<Table> for Coord {
     type Error = LoadError;
-    fn try_from(table: v::Table) -> Result<Coord, Self::Error> {
+    fn try_from(table: Table) -> Result<Coord, Self::Error> {
         fn err_from_table_index(error: TableError) -> LoadError {
             match error {
                 TableError::NonContinuous(index) =>
@@ -535,16 +540,16 @@ impl TryFrom<v::Table> for Coord {
         }
         fn err_unexpected_key(key: Key) -> LoadError { LoadError::from(format!(
             "coord representation should not have {key:?} field" )) }
-        fn i32_ok(value: v::Value) -> Result<i32, LoadError> {
+        fn i32_ok(value: Value) -> Result<i32, LoadError> {
             match value {
-                v::Value::Integer(z) => Ok(z),
+                Value::Integer(z) => Ok(z),
                 _ => Err(LoadError::from(
                     "coord field values should be integers" )),
             }
         }
         let (mut x, mut y) = (None, None);
         table.try_into_named(
-            |name, value| { match name.as_str() {
+            |name, value| { match name.as_ref() {
                 "x" => x = Some(i32_ok(value)?),
                 "y" => y = Some(i32_ok(value)?),
                 _ => return Err(err_unexpected_key(Key::Name(name))),
@@ -557,47 +562,51 @@ impl TryFrom<v::Table> for Coord {
     }
 }
 
-impl From<Coord> for v::Value {
-    fn from(this: Coord) -> v::Value {
-        let mut table = v::TableDumpBuilder::new(Some(0), Some(1));
-        table.assoc_insert("x", Some(v::Value::Integer(this.x)));
-        table.assoc_insert("y", Some(v::Value::Integer(this.y)));
-        v::Value::Table(table.finish())
+impl From<Coord> for Value {
+    fn from(this: Coord) -> Value {
+        let mut table = TableBuilder::new(0, Some(1));
+        table.assoc_insert("x", Some(Value::Integer(this.x)));
+        table.assoc_insert("y", Some(Value::Integer(this.y)));
+        Value::Table(table.finish())
     }
 }
 
 #[cfg(test)]
 mod test {
 
-use super::{Coord, Operand, Place, Register, Value};
+use crate::string::Str;
+
+use super::{Coord, Operand, Place, Register, OpValue};
 
 #[test]
 fn test_operand_serde_ron() {
-    for (op, op_str) in [
+    for (o, s) in [
         (Operand::UnknownUnset,         "Unset"),
         (Operand::UnknownSkipped,       "Skipped"),
         (Operand::UnknownIndex(42),     "Index(42)"),
         (Operand::Place(None),          "SkippedPlace"),
         (Operand::Place(Some(Place::Parameter(42))),
                                         "Parameter(42)" ),
-        (Operand::Place(Some(Place::Variable(String::from("ABC")))),
+        (Operand::Place(Some(Place::Variable(Str::from("ABC")))),
                                         "Variable(\"ABC\")" ),
         (Operand::Place(Some(Place::Register(Register::Signal))),
                                         "Register(Signal)" ),
         (Operand::Value(None),          "SkippedValue"),
-        (Operand::Value(Some(Value::Number(42))),
+        (Operand::Value(Some(OpValue::Number(42))),
                                         "Number(42)" ),
-        (Operand::Value(Some(Value::Item(String::from("coconut")))),
+        (Operand::Value(Some(OpValue::Item(Str::from("coconut")))),
                                         "Item(\"coconut\")" ),
-        (Operand::Value(Some(Value::ItemCount(String::from("coconut"), 42))),
+        (Operand::Value(Some(OpValue::ItemCount(Str::from("coconut"), 42))),
                                         "ItemCount(\"coconut\",42)" ),
-        (Operand::Value(Some(Value::Coord(Coord { x: 42, y: -42 }))),
+        (Operand::Value(Some(OpValue::Coord(Coord { x: 42, y: -42 }))),
                                         "Coord((x:42,y:-42))" ),
-        (Operand::Value(Some(Value::CoordCount(Coord { x: 42, y: -42 }, 42))),
+        (Operand::Value(Some(OpValue::CoordCount(Coord { x: 42, y: -42 }, 42))),
                                         "CoordCount((x:42,y:-42),42)" ),
     ] {
-        assert_eq!(ron::to_string(&op), Ok(String::from(op_str)));
-        assert_eq!(Ok(op), ron::from_str::<Operand>(op_str));
+        let as_str = String::as_str;
+        let ron_result = ron::to_string(&o);
+        assert_eq!(ron_result.as_ref().map(as_str), Ok(s));
+        assert_eq!(Ok(o), ron::from_str(s));
     }
 }
 

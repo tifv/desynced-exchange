@@ -1,19 +1,34 @@
 use crate::{
+    common::iexp2,
+    error::DumpError as Error,
+    table_iter::{TableItem, AssocItem},
+    dump::{
+        KeyDump, Dump, TableDumpIter,
+        Dumper as DumperTr, KeyDumper,
+    },
     Exchange,
-    table::{TableItem, AssocItem, iexp2},
-};
-use super::{
-    error::Error, writer::Writer,
-    DumpKey, Dump, DumpTableIterator,
-    Dumper as DD, KeyDumper as KDD,
 };
 
+pub(crate) mod compress;
+
+mod writer;
+use writer::Writer;
+
 const EXCEEDED_LOGLEN: u16 = crate::MAX_ASSOC_LOGLEN + 1;
+
+pub fn dump_blueprint<P, B>(exchange: Exchange<Option<P>, Option<B>>)
+-> Result<String, Error>
+where P: Dump, B: Dump
+{
+    let encoded_body = encode_blueprint(exchange)?;
+    Ok(compress::compress(encoded_body.as_deref()))
+}
 
 pub(crate) fn encode_blueprint<P, B>(exchange: Exchange<Option<P>, Option<B>>)
 -> Result<Exchange<Vec<u8>, Vec<u8>>, Error>
 where P: Dump, B: Dump
 {
+    #[inline]
     fn dump<V: Dump>(value: Option<V>) -> Result<Vec<u8>, Error> {
         let mut dumper = Dumper::new();
         V::dump_option(value.as_ref(), &mut dumper)?;
@@ -52,9 +67,9 @@ impl Dumper {
     }
 
     #[inline]
-    fn dump_table_header<'v, T: DumpTableIterator<'v>>( &mut self,
-        table: &T,
-    ) -> Result<(), Error> {
+    fn dump_table_header<'v, T>(&mut self, table: &T) -> Result<(), Error>
+    where T: TableDumpIter<'v>, T::Key: KeyDump
+    {
         self.output.reserve(4);
         match (table.array_len(), table.assoc_loglen()) {
             (len @ 0 ..= 0xF, None) => {
@@ -87,28 +102,31 @@ impl Dumper {
         Ok(())
     }
 
+    #[allow(clippy::unnecessary_wraps)]
     #[inline]
-    fn dump_dead_key(&mut self) {
-        self.write_byte(0xC5)
+    fn dump_dead_key(&mut self) -> Result<(), Error> {
+        self.write_byte(0xC5);
+        Ok(())
     }
 
 }
 
-impl KDD for &mut Dumper {
-    type Ok = ();
-    type Error = Error;
+impl KeyDumper for &mut Dumper {
+    type Ok = <Self as DumperTr>::Ok;
+    type Error = <Self as DumperTr>::Error;
 
-    fn dump_integer(self, value: i32) -> Result<Self::Ok, Error> {
-        <Self as DD>::dump_integer(self, value)
+    #[inline]
+    fn dump_integer(self, value: i32) -> Result<Self::Ok, Self::Error> {
+        <Self as DumperTr>::dump_integer(self, value)
     }
 
-    fn dump_string(self, value: &str) -> Result<Self::Ok, Error> {
-        <Self as DD>::dump_string(self, value)
+    #[inline]
+    fn dump_string(self, value: &str) -> Result<Self::Ok, Self::Error> {
+        <Self as DumperTr>::dump_string(self, value)
     }
-
 }
 
-impl DD for &mut Dumper {
+impl DumperTr for &mut Dumper {
     type Ok = ();
     type Error = Error;
 
@@ -185,12 +203,11 @@ impl DD for &mut Dumper {
         Ok(())
     }
 
-    fn dump_table<'v, K, V, T>( self,
-        table: T,
-    ) -> Result<Self::Ok, Error>
+    fn dump_table<'v, T>(self, table: T) -> Result<Self::Ok, Error>
     where
-        K: DumpKey, V: Dump + 'v,
-        T: DumpTableIterator<'v, Key=K, Value=V>,
+        T: TableDumpIter<'v>,
+        T::Key: KeyDump,
+        T::Value: Dump,
     {
         let mut array_len = table.array_len();
         let mut assoc_len = iexp2(table.assoc_loglen());
@@ -226,8 +243,7 @@ const SERIAL_LEN: usize = {
 };
 
 struct SerialWriter<'v, K, V>
-where
-    K: DumpKey, V: Dump,
+where K: KeyDump, V: Dump
 {
     dumper: &'v mut Dumper,
     values: [Option<TableItem<K, &'v V>>; SERIAL_LEN],
@@ -236,8 +252,7 @@ where
 }
 
 impl<'v, K, V> SerialWriter<'v, K, V>
-where
-    K: DumpKey, V: Dump,
+where K: KeyDump, V: Dump
 {
     fn new(dumper: &'v mut Dumper) -> Self {
         Self {
@@ -285,8 +300,7 @@ where
                 self.dumper.dump_nil()?;
             }
             match key {
-                // None => self.ser.serialize_dead()?,
-                None => self.dumper.dump_dead_key(),
+                None => self.dumper.dump_dead_key()?,
                 Some(key) => key.dump_key(&mut *self.dumper)?,
             }
             self.dumper.write_byte(match Self::encode_link(link) {

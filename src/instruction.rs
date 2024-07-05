@@ -5,49 +5,22 @@ use serde::{
 };
 
 use crate::{
-    load::error::Error as LoadError,
-    value::{self as v, Key, TableIntoError as TableError, LimitedVec},
-    table::ilog2_ceil,
+    error::LoadError,
+    common::ilog2_ceil,
+    string::Str,
+    value::{
+        TableIntoError as TableError,
+        Key, Value, Table,
+        TableBuilder,
+        LimitedVec,
+        map_tree::Value as ReprValue,
+    },
     serde::{
-        DeIdentifier,
-        ExtraFields, FieldNames,
+        Identifier,
+        ExtraFields, define_field_names,
     },
     operand::{Operand, Jump},
 };
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum ExtraValue {
-    Boolean(bool),
-    Integer(i32),
-    Float(f64),
-    String(String),
-}
-
-impl TryFrom<v::Value> for ExtraValue {
-    type Error = LoadError;
-
-    fn try_from(value: v::Value) -> Result<ExtraValue, Self::Error> {
-        Ok(match value {
-            v::Value::Boolean(value) => ExtraValue::Boolean(value),
-            v::Value::Integer(value) => ExtraValue::Integer(value),
-            v::Value::Float  (value) => ExtraValue::Float  (value),
-            v::Value::String (value) => ExtraValue::String (value),
-            v::Value::Table(_) => return Err(LoadError::from(
-                "an extra value should not be a table" )),
-        })
-    }
-}
-
-impl From<ExtraValue> for v::Value {
-    fn from(value: ExtraValue) -> v::Value {
-        match value {
-            ExtraValue::Boolean(value) => v::Value::Boolean(value),
-            ExtraValue::Integer(value) => v::Value::Integer(value),
-            ExtraValue::Float  (value) => v::Value::Float  (value),
-            ExtraValue::String (value) => v::Value::String (value),
-        }
-    }
-}
 
 define_field_names!(
     pub ExtraInstructionNames,
@@ -58,23 +31,23 @@ define_field_names!(
 );
 
 pub type ExtraInstructionFields =
-    ExtraFields<ExtraInstructionNames, ExtraValue>;
+    ExtraFields<ExtraInstructionNames, ReprValue>;
 
 // subroutines can create instructions with an arbitrary number of parameters
 const INSTRUCTION_MAX_ARGS: usize = 256;
 
 #[derive(Debug, Clone)]
 pub struct Instruction {
-    pub operation: String,
+    pub operation: Str,
     pub args: Vec<Operand>,
     pub next: Jump,
     pub extra: ExtraInstructionFields,
 }
 
-impl TryFrom<v::Value> for Instruction {
+impl TryFrom<Value> for Instruction {
     type Error = LoadError;
-    fn try_from(value: v::Value) -> Result<Instruction, Self::Error> {
-        let v::Value::Table(table) = value else {
+    fn try_from(value: Value) -> Result<Instruction, Self::Error> {
+        let Value::Table(table) = value else {
             return Err(LoadError::from(
                 "instruction should be represented by a table value" ));
         };
@@ -82,16 +55,16 @@ impl TryFrom<v::Value> for Instruction {
     }
 }
 
-impl TryFrom<v::Table> for Instruction {
+impl TryFrom<Table> for Instruction {
     type Error = LoadError;
-    fn try_from(table: v::Table) -> Result<Instruction, Self::Error> {
+    fn try_from(table: Table) -> Result<Instruction, Self::Error> {
         InstructionBuilder::build_from(table)
     }
 }
 
 #[derive(Default)]
 struct InstructionBuilder {
-    operation: Option<String>,
+    operation: Option<Str>,
     args: Vec<Operand>,
     next: Option<Jump>,
     extra: ExtraInstructionFields,
@@ -99,16 +72,16 @@ struct InstructionBuilder {
 
 impl InstructionBuilder {
 
-    fn build_from(table: v::Table) -> Result<Instruction, LoadError> {
+    fn build_from(table: Table) -> Result<Instruction, LoadError> {
         const MAX_ARGS: usize = INSTRUCTION_MAX_ARGS;
         let mut this = Self::default();
         let array: LimitedVec<MAX_ARGS, _> = table.try_into_seq_and_named(
-            |name, value| match name.as_str() {
+            |name, value| match name.as_ref() {
                 "op"   => this.set_operation (value),
                 "next" => this.set_next      (value),
                 "args" => Err(Self::err_unexpected_key(Key::from("args"))),
-                key => {
-                    if this.extra.insert(key, value.try_into()?).is_some() {
+                _ => {
+                    if this.extra.insert(name, ReprValue(value)).is_some() {
                         unreachable!("duplicate key");
                     } else {
                         Ok(())
@@ -141,15 +114,15 @@ impl InstructionBuilder {
     fn err_unexpected_key(key: Key) -> LoadError { LoadError::from(format!(
         "instruction representation should not have {key:?} key" )) }
 
-    fn set_operation(&mut self, value: v::Value) -> Result<(), LoadError> {
-        let v::Value::String(value) = value else {
+    fn set_operation(&mut self, value: Value) -> Result<(), LoadError> {
+        let Value::String(value) = value else {
             return Err(LoadError::from(
                 "instruction's operation should be a string" ));
         };
         self.operation = Some(value); Ok(())
     }
 
-    fn set_next(&mut self, value: v::Value) -> Result<(), LoadError> {
+    fn set_next(&mut self, value: Value) -> Result<(), LoadError> {
         self.next = Some(Jump::try_from(Some(value))?); Ok(())
     }
 
@@ -182,13 +155,13 @@ impl<'de> serde::de::Visitor<'de> for InstructionBuilder {
         A: serde::de::MapAccess<'de>,
     {
         use serde::de::Error as _;
-        while let Some(key) = map.next_key::<DeIdentifier>()? {
-            match &*key {
+        while let Some(name) = map.next_key::<Identifier>()?.map(Str::from) {
+            match name.as_ref() {
                 "op"    => self.operation = Some(map.next_value()?),
                 "args"  => self.args      = map.next_value()?,
                 "next"  => self.next      = Some(map.next_value()?),
-                key => {
-                    self.extra.insert(key, map.next_value()?);
+                _ => {
+                    self.extra.consume_next_value(name, &mut map)?;
                 },
             }
         }
@@ -197,28 +170,28 @@ impl<'de> serde::de::Visitor<'de> for InstructionBuilder {
 
 }
 
-impl From<Instruction> for v::Value {
-    fn from(this: Instruction) -> v::Value {
-        let mut table = v::TableDumpBuilder::new(
-            Some( this.args.len().try_into()
-                .expect("length should fit") ),
+impl From<Instruction> for Value {
+    fn from(this: Instruction) -> Value {
+        let mut table = TableBuilder::new(
+            this.args.len().try_into()
+                .expect("length should fit"),
             ilog2_ceil(
                 2 // operation, next
                 + this.extra.len()
             ),
         );
         table.array_extend( this.args.into_iter()
-            .map(Option::<v::Value>::from) );
-        table.assoc_insert("op", Some(v::Value::String(this.operation)));
+            .map(Option::<Value>::from) );
+        table.assoc_insert("op", Some(Value::String(this.operation)));
         if let Some(next_value) = this.next.into() {
             table.assoc_insert("next", Some(next_value));
         } else {
             table.assoc_insert_dead("next");
         }
-        for (key, value) in this.extra {
-            table.assoc_insert(key, Some(v::Value::from(value)));
+        for (key, ReprValue(value)) in this.extra {
+            table.assoc_insert(key, Some(value));
         }
-        v::Value::Table(table.finish())
+        Value::Table(table.finish())
     }
 }
 

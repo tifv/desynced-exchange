@@ -246,18 +246,22 @@
 // #![warn(clippy::exhaustive_enums)]
 // #![warn(clippy::exhaustive_structs)]
 
-use ::serde::{Serialize, Deserialize};
+use ::serde::{Deserialize, Serialize};
 
+mod common;
 mod ascii;
 mod intlim;
-
-#[macro_use]
 mod serde;
 
-pub mod table;
+pub mod error;
+pub mod string;
+pub mod table_iter;
+
 pub mod load;
 pub mod dump;
 
+pub mod dumper;
+pub mod loader;
 pub mod value;
 
 pub mod blueprint;
@@ -269,7 +273,7 @@ mod test;
 
 const MAX_ASSOC_LOGLEN: u16 = 5;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Exchange<P, B> {
     Blueprint(P),
     Behavior(B),

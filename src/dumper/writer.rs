@@ -1,25 +1,19 @@
 #![allow(dead_code)]
-#![allow(unsafe_op_in_unsafe_fn)]
-#![allow(clippy::undocumented_unsafe_blocks)]
-#![allow(clippy::multiple_unsafe_ops_per_block)]
 
-use std::hint::unreachable_unchecked;
-
-use crate::ascii::{Ascii, AsciiArray, AsciiStr, AsciiString};
+use crate::{
+    common::ptr_sub,
+    ascii::{Ascii, AsciiArray, AsciiStr, AsciiString}
+};
 
 pub(super) struct Writer {
+    // SAFETY-BEARING invariants:
+    // `start <= cursor <= end`;
+    // `start .. end` is an object allocated by `Vec<u8>`;
+    // …and we own it;
+    // `start .. cursor` is initialized.
     start: *mut u8,
     cursor: *mut u8,
     end: *mut u8,
-}
-
-#[inline]
-unsafe fn ptr_sub<T>(more: *mut T, less: *mut T) -> usize {
-    let diff = more.offset_from(less);
-    if diff < 0 {
-        unreachable_unchecked()
-    }
-    diff as usize
 }
 
 impl Writer {
@@ -33,13 +27,13 @@ impl Writer {
     #[inline]
     pub fn from_vec(vec: Vec<u8>) -> Self {
         let mut vec = vec;
-        unsafe {
-            let start = vec.as_mut_ptr();
-            let cursor = start.add(vec.len());
-            let end = start.add(vec.capacity());
-            std::mem::forget(vec);
-            Self { start, cursor, end }
-        }
+        let start = vec.as_mut_ptr();
+        // SAFETY: known properties of `Vec`
+        let cursor = unsafe { start.add(vec.len()) };
+        // SAFETY: known properties of `Vec`
+        let end = unsafe { start.add(vec.capacity()) };
+        std::mem::forget(vec);
+        Self { start, cursor, end }
     }
 
     #[inline]
@@ -54,13 +48,14 @@ impl Writer {
 
     #[inline]
     pub fn into_vec(self) -> Vec<u8> {
-        unsafe {
-            let Self { start, cursor, end } = self;
-            std::mem::forget(self);
-            let len = ptr_sub(cursor, start);
-            let cap = ptr_sub(end, start);
-            Vec::from_raw_parts(start, len, cap)
-        }
+        let Self { start, cursor, end } = self;
+        std::mem::forget(self);
+        // SAFETY: struct invariant
+        let len = unsafe { ptr_sub(cursor, start) };
+        // SAFETY: struct invariant
+        let cap = unsafe { ptr_sub(end, start) };
+        // SAFETY: struct invariant
+        unsafe { Vec::from_raw_parts(start, len, cap) }
     }
 
     #[inline]
@@ -74,6 +69,7 @@ impl Writer {
 
     #[inline]
     fn free_cap(&self) -> usize {
+        // SAFETY: struct invariant
         unsafe { ptr_sub(self.end, self.cursor) }
     }
 
@@ -84,25 +80,30 @@ impl Writer {
 
     #[inline]
     pub fn write_array<const N: usize>(&mut self, value: [u8; N]) {
-        unsafe {
-            if self.free_cap() < N {
-                self.reserve(N);
-            }
-            self.cursor.cast::<[u8; N]>().write(value);
-            self.cursor = self.cursor.add(N);
+        if self.free_cap() < N {
+            self.reserve(N);
         }
+        // SAFETY: we have just checked the free capacity
+        unsafe {
+            self.cursor.cast::<[u8; N]>().write(value);
+        }
+        // SAFETY: we have just checked the free capacity
+        self.cursor = unsafe { self.cursor.add(N) };
     }
 
     #[inline]
     pub fn write_slice(&mut self, value: &[u8]) {
         let len = value.len();
-        unsafe {
-            if self.free_cap() < len {
-                self.reserve(len);
-            }
-            std::ptr::copy_nonoverlapping(value.as_ptr(), self.cursor, len);
-            self.cursor = self.cursor.add(len);
+        if self.free_cap() < len {
+            self.reserve(len);
         }
+        // SAFETY: we have just checked the free capacity;
+        // also, we own our slice, so it is indeed nonoverlapping.
+        unsafe {
+            std::ptr::copy_nonoverlapping(value.as_ptr(), self.cursor, len);
+        }
+        // SAFETY: we have just checked the free capacity.
+        self.cursor = unsafe { self.cursor.add(len) };
     }
 
 }
@@ -116,6 +117,8 @@ impl Drop for Writer {
 }
 
 pub(super) struct AsciiWriter {
+    // SAFETY-BEARING invariant:
+    // `inner` actually only receives ASCII bytes
     inner: Writer,
 }
 
@@ -138,13 +141,14 @@ impl AsciiWriter {
 
     pub fn into_string(self) -> AsciiString {
         let vec = self.inner.into_vec();
+        // SAFETY: struct invariant
         unsafe {
             AsciiString::from_bytes_unchecked(vec)
         }
     }
 
     pub fn write_byte(&mut self, value: Ascii) {
-        self.write_array([value])
+        self.inner.write_byte(value.into())
     }
 
     pub fn write_array<const N: usize>(&mut self, value: [Ascii; N]) {

@@ -1,14 +1,31 @@
 use std::marker::PhantomData;
 
 use crate::{
-    Exchange,
-    table::{TableItem, AssocItem, TableSize, iexp2, u32_to_usize},
+    error::LoadError as Error,
+    common::{iexp2, u32_to_usize},
+    table_iter::{
+        TableItem, AssocItem,
+        TableSize,
+    },
+    load::{
+        KeyLoad, Load,
+        KeyBuilder, Builder,
+        Loader as LoaderTr, TableLoader
+    },
+    Exchange
 };
-use super::{
-    error::Error, reader::Reader,
-    LoadKey, Load, LoadTableIterator,
-    Loader as LL,
-};
+
+pub(crate) mod decompress;
+
+mod reader;
+use reader::Reader;
+
+pub fn load_blueprint<P, B, E>(exchange: &str)
+-> Result<Exchange<Option<P>, Option<B>>, Error>
+where P: Load, B: Load,
+{
+    decode_blueprint(decompress::decompress(exchange)?)
+}
 
 pub(crate) fn decode_blueprint<P, B>(encoded_data: Exchange<Vec<u8>,Vec<u8>>)
 -> Result<Exchange<Option<P>, Option<B>>, Error>
@@ -17,16 +34,16 @@ where P: Load, B: Load,
     Ok(match encoded_data {
         Exchange::Blueprint(encoded_body) =>
             Exchange::Blueprint(P::load(
-                &mut Loader::new(Reader::from_slice(&encoded_body))
+                &mut Loader::new(&encoded_body)
             )?),
         Exchange::Behavior (encoded_body) =>
             Exchange::Behavior (B::load(
-                &mut Loader::new(Reader::from_slice(&encoded_body))
+                &mut Loader::new(&encoded_body)
             )?),
     })
 }
 
-pub(super) struct Loader<'data> {
+pub struct Loader<'data> {
     reader: Reader<'data>,
     max_array_len: u32,
 }
@@ -59,9 +76,10 @@ impl TableHeader {
 
 impl<'data> Loader<'data> {
 
-    pub(super) fn new(reader: Reader<'data>) -> Self {
+    pub fn new(data: &'data [u8]) -> Self {
         // The most compact representation of an array element
         // is bitmask, which is eight (nil) elements per one byte.
+        let reader = Reader::from_slice(data);
         let max_array_len = u32::try_from(reader.len())
             .unwrap_or(u32::MAX)
             .saturating_mul(8);
@@ -72,7 +90,8 @@ impl<'data> Loader<'data> {
     }
 
     fn read_byte(&mut self) -> Result<u8, Error> {
-        self.read_array::<1>().map(|[x]| x)
+        self.reader.read_byte()
+            .ok_or_else(error_eof)
     }
 
     fn read_array<const N: usize>(&mut self) -> Result<[u8; N], Error> {
@@ -149,7 +168,7 @@ impl<'data> Loader<'data> {
     ) -> Result<TableHeader, Error> {
         #![allow(clippy::cast_lossless)]
         Ok(match head {
-            head @ 0x80 ..= 0x8F => {
+            0x80 ..= 0x8F => {
                 let mut array_len = 0_u32;
                 if head & 0x01 > 0 {
                     let mut k = 1_u32;
@@ -176,7 +195,7 @@ impl<'data> Loader<'data> {
                     assoc_last_free,
                 }
             },
-            head @ 0x90 ..= 0x9F =>
+            0x90 ..= 0x9F =>
                 TableHeader::array((head & 0x0F) as u32),
             0xDC => TableHeader::array(
                 u16::from_le_bytes(self.read_array::<2>()?) as u32,
@@ -187,12 +206,13 @@ impl<'data> Loader<'data> {
 
 }
 
-impl<'data> LL for &mut Loader<'data> {
+impl<'data> LoaderTr for &mut Loader<'data> {
     type Error = Error;
 
-    fn load_value<B: super::Builder>( self,
-        builder: B,
-    ) -> Result<Option<B::Output>, Error> {
+    fn load_value<B>(self, builder: B)
+    -> Result<Option<B::Output>, Error>
+    where B: Builder
+    {
         let head = self.read_byte()?;
         match head {
             0xC0 => {
@@ -236,27 +256,30 @@ impl<'data> LL for &mut Loader<'data> {
         }
     }
 
-    fn load_key<B: super::KeyBuilder>( self,
-        builder: B,
-    ) -> Result<Option<B::Output>, Error> {
+    fn load_key<KB>(self, builder: KB)
+    -> Result<Option<KB::Output>, Error>
+    where KB: KeyBuilder
+    {
         let head = self.read_byte()?;
         match head {
             0xC5 => Ok(None),
             0x00 ..= 0x7F | 0xE0 ..= 0xFF |
             0xCC | 0xCD | 0xCE |
-            0xD0 | 0xD1 | 0xD2 => builder.build_integer(
-                self.load_integer(head)?
-            ).map(Some),
-            0xA0 ..= 0xBF | 0xD9 | 0xDA => {
-                builder.build_string(self.load_string(head)?).map(Some)
-            },
+            0xD0 | 0xD1 | 0xD2 => Ok(Some(
+                builder.build_integer::<Error>(self.load_integer(head)?)?
+            )),
+            0xA0 ..= 0xBF | 0xD9 | 0xDA => Ok(Some(
+                builder.build_string::<Error>(self.load_string(head)?)?
+            )),
             _ => Err(error_unexpected()),
         }
     }
 
 }
 
-struct SerialReader<'l, 'data: 'l, K: LoadKey, V: Load> {
+struct SerialReader<'l, 'data: 'l, K, V>
+where K: KeyLoad, V: Load
+{
     loader: &'l mut Loader<'data>,
     array_len: u32,
     assoc_loglen: Option<u16>,
@@ -267,7 +290,7 @@ struct SerialReader<'l, 'data: 'l, K: LoadKey, V: Load> {
 }
 
 impl<'l, 'data: 'l, K, V> SerialReader<'l, 'data, K, V>
-where K: LoadKey, V: Load,
+where K: KeyLoad, V: Load
 {
     fn new(
         loader: &'l mut Loader<'data>,
@@ -328,7 +351,7 @@ where K: LoadKey, V: Load,
 }
 
 impl<'l, 'data: 'l, K, V> TableSize for SerialReader<'l, 'data, K, V>
-where K: LoadKey, V: Load,
+where K: KeyLoad, V: Load
 {
     fn array_len(&self) -> u32 {
         self.array_len
@@ -342,7 +365,7 @@ where K: LoadKey, V: Load,
 }
 
 impl<'l, 'data: 'l, K, V> Iterator for SerialReader<'l, 'data, K, V>
-where K: LoadKey, V: Load,
+where K: KeyLoad, V: Load
 {
     type Item = Result<Option<TableItem<K, V>>, Error>;
     fn next(&mut self) -> Option<Self::Item> {
@@ -358,8 +381,8 @@ where K: LoadKey, V: Load,
     }
 }
 
-impl<'l, 'data: 'l, K, V> LoadTableIterator for SerialReader<'l, 'data, K, V>
-where K: LoadKey, V: Load,
+impl<'l, 'data: 'l, K, V> TableLoader for SerialReader<'l, 'data, K, V>
+where K: KeyLoad, V: Load
 {
     type Key = K;
     type Value = V;

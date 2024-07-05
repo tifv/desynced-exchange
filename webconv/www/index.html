@@ -8,8 +8,18 @@
             min-width: 600px;
             min-height: 400px;
         }
-        .buttons__switch {
+        .buttons, .settings {
             margin-block: 2ex;
+        }
+        .input_container__block {
+            display: flex;
+            flex-direction: row;
+        }
+        fieldset > legend {
+            white-space: nowrap;
+        }
+        fieldset > label {
+            display: block;
         }
     </style>
 </head>
@@ -37,39 +47,44 @@
                >Encode</button>
         </div>
         <div class="spoiler settings">
-            <h5 class="spoiler--heading">Settings</h5>
-            <div class="spoiler--inner">
+            <label class="spoiler--heading">Settings</label>
+            <div class="spoiler--inner input_container input_container__block">
                 <fieldset>
-                    <legend>Decode format:</legend>
-                    <input id="decode_format--ron"
-                        type="radio" name="decode_format" value="ron" checked />
-                        <label for="decode_format--ron">RON</label>
-                    <input id="decode_format--json"
-                        type="radio" name="decode_format" value="json" />
-                        <label for="decode_format--json">JSON</label>
+                    <legend>Decode format</legend>
+                    <label for="decode_format--ron">
+                        <input id="decode_format--ron"
+                            type="radio" name="decode_format" value="ron" checked />
+                        RON</label>
+                    <label for="decode_format--json">
+                        <input id="decode_format--json"
+                            type="radio" name="decode_format" value="json" />
+                        JSON</label>
                 </fieldset>
                 <fieldset>
-                    <legend>Decode style:</legend>
-                    <input id="decode_style--pretty"
-                        type="radio" name="decode_style" value="pretty" checked />
-                        <label for="decode_style--pretty">Pretty</label>
-                    <input id="decode_style--compact"
-                        type="radio" name="decode_style" value="compact" />
-                        <label for="decode_style--compact">Compact</label>
+                    <legend>Decode style</legend>
+                    <label for="decode_style--pretty">
+                        <input id="decode_style--pretty"
+                            type="radio" name="decode_style" value="pretty" checked />
+                        Pretty</label>
+                    <label for="decode_style--compact">
+                        <input id="decode_style--compact"
+                            type="radio" name="decode_style" value="compact" />
+                        Compact</label>
                 </fieldset>
                 <fieldset>
-                    <legend>Intermediate representation:</legend>
-                    <input id="inter_repr--struct"
-                        type="radio" name="inter_repr" value="struct" checked />
-                        <label for="inter_repr--struct">Structure</label>
-                    <input id="inter_repr--tree"
-                        type="radio" name="inter_repr" value="tree" />
-                        <label for="inter_repr--tree">Tree</label>
-                    <div class="comment"
-                       >Tree representation will give a more nuanced
-                        look into the structure of a blueprint,
-                        but will generally fail to encode
-                        (for various reasons).</div>
+                    <legend>Intermediate representation</legend>
+                    <label for="inter_repr--struct">
+                        <input id="inter_repr--struct"
+                            type="radio" name="inter_repr" value="struct" checked />
+                        Structure</label>
+                    <label for="inter_repr--map_tree">
+                        <input id="inter_repr--map_tree"
+                            type="radio" name="inter_repr" value="map_tree" />
+                        Map Tree (debug, won't encode correctly)</label>
+                    <label for="inter_repr--table_dump">
+                        <input id="inter_repr--table_dump"
+                            type="radio" name="inter_repr" value="table_dump" />
+                        Table Dump (very debug)</label>
                 </fieldset>
             </div>
         </div>

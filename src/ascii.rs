@@ -138,6 +138,8 @@ impl From<Ascii> for char {
     }
 }
 
+/// Mostly useful for enabling conversions of `[Ascii]`
+/// into `str` and `[u8]`.
 #[repr(transparent)]
 pub(crate) struct AsciiStr(pub [Ascii]);
 
@@ -341,7 +343,7 @@ impl TryFrom<Vec<u8>> for AsciiString {
     type Error = AsciiError;
     fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
         value.is_ascii().then(|| {
-            // SAFETY: we just checked for ASCII values
+            // SAFETY: we have just checked for ASCII values
             unsafe { AsciiString::from_bytes_unchecked(value) }
         } ).ok_or(AsciiError)
     }
@@ -351,7 +353,7 @@ impl TryFrom<String> for AsciiString {
     type Error = AsciiError;
     fn try_from(value: String) -> Result<Self, Self::Error> {
         value.is_ascii().then(|| {
-            // SAFETY: we just checked for ASCII values
+            // SAFETY: we have just checked for ASCII values
             unsafe { AsciiString::from_string_unchecked(value) }
         } ).ok_or(AsciiError)
     }
@@ -377,7 +379,7 @@ macro_rules! ascii_char {
     ($value:literal) => { {
         const VALUE: $crate::ascii::Ascii = {
             assert!($crate::ascii::char_is_ascii($value));
-            // SAFETY: we just checked for ASCII value
+            // SAFETY: we have just checked for ASCII value
             unsafe { $crate::ascii::Ascii::from_byte_unchecked(
                 $value as u8
             ) }
@@ -393,7 +395,7 @@ macro_rules! ascii_str {
         const VALUE: &'static $crate::ascii::AsciiStr = {
             let value: &'static str = $value;
             assert!($crate::ascii::str_is_ascii(value));
-            // SAFETY: we just checked for ASCII values
+            // SAFETY: we have just checked for ASCII values
             unsafe { $crate::ascii::AsciiStr::from_bytes_unchecked(
                 value.as_bytes()
             ) }

@@ -6,9 +6,10 @@ use serde::{
 };
 
 use crate::{
-    load::error::Error as LoadError,
+    error::LoadError,
+    common::ilog2_ceil,
+    string::Str,
     value::{self as v, Key, TableIntoError as TableError},
-    table::ilog2_ceil,
     serde::option_some as serde_option_some,
     instruction::Instruction,
 };
@@ -19,12 +20,12 @@ pub struct Behavior {
     #[serde( default,
         skip_serializing_if="Option::is_none",
         with="serde_option_some" )]
-    pub name: Option<String>,
+    pub name: Option<Str>,
 
     #[serde( default,
         skip_serializing_if="Option::is_none",
         with="serde_option_some" )]
-    pub description: Option<String>,
+    pub description: Option<Str>,
 
     #[serde(default, skip_serializing_if="Vec::is_empty")]
     pub parameters: Vec<Parameter>,
@@ -41,7 +42,7 @@ pub struct Parameter {
     #[serde( default,
         skip_serializing_if="Option::is_none",
         with="serde_option_some" )]
-    pub name: Option<String>,
+    pub name: Option<Str>,
     pub is_output: bool,
 }
 
@@ -65,8 +66,8 @@ impl TryFrom<v::Table> for Behavior {
 
 #[derive(Default)]
 struct BehaviorBuilder {
-    name: Option<String>,
-    description: Option<String>,
+    name: Option<Str>,
+    description: Option<Str>,
     parameters: Vec<Parameter>,
     parameter_names: Option<v::Table>,
     instructions: Vec<Instruction>,
@@ -78,7 +79,7 @@ impl BehaviorBuilder {
     fn build_from(table: v::Table) -> Result<Behavior, LoadError> {
         let mut this = Self::default();
         let vector: Vec<_> = table.try_into_seq_and_named(
-            |name, value| match name.as_str() {
+            |name, value| match name.as_ref() {
                 "name"       => this.set_name           (value),
                 "desc"       => this.set_description    (value),
                 "parameters" => this.set_parameters     (value),
@@ -221,9 +222,9 @@ impl BehaviorBuilder {
 
 impl From<Behavior> for v::Value {
     fn from(this: Behavior) -> v::Value {
-        let mut table = v::TableDumpBuilder::new(
-            Some( this.instructions.len().try_into()
-                .expect("length should fit") ),
+        let mut table = v::TableBuilder::new(
+            this.instructions.len().try_into()
+                .expect("length should fit"),
             ilog2_ceil(
                 usize::from(this.name.is_some()) +
                 usize::from(this.description.is_some()) +
