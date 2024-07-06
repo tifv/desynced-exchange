@@ -103,6 +103,10 @@ impl std::ops::Deref for Ascii {
     fn deref(&self) -> &u8 { &self.0 }
 }
 
+impl AsRef<u8> for Ascii {
+    fn as_ref(&self) -> &u8 { self }
+}
+
 impl TryFrom<u8> for Ascii {
     type Error = AsciiError;
     #[inline]

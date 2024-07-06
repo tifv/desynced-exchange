@@ -18,10 +18,13 @@ pub(crate) fn compress<'b>(
     let mut writer = AsciiWriter::with_capacity(36);
     writer.write_slice(prefix);
     let mut zipped = None;
-    let (len, body) = if body.len() <= 32 { (0, body) } else {
-        let len = body.len();
-        let zipped = zipped.insert(zip(body));
-        (len, &**zipped)
+    let (len, body) = {
+        let zipped: &_ = zipped.insert(zip(body));
+        if body.len() <= zipped.len() {
+            (0, body)
+        } else {
+            (body.len(), zipped.as_ref())
+        }
     };
     write_len_base31(&mut writer, len);
     let checksum = write_encoded(&mut writer, body);
@@ -136,7 +139,11 @@ impl<'w> Base62Encoder<'w> {
     fn consume_final_word(&mut self) {
         let word = self.take_word();
         self.checksum += word;
-        let (start, encoded) = Self::encode_word(word);
+        let (mut start, encoded) = Self::encode_word(word);
+        if !encoded[start].is_ascii_digit() {
+            assert!(start > 0);
+            start -= 1;
+        }
         self.writer.write_slice(&encoded[start..]);
     }
     #[inline]

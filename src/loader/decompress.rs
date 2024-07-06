@@ -126,6 +126,10 @@ impl<'r> Base62Decoder<'r> {
     }
     fn emit_final_word(&mut self) -> Result<u32, Error> {
         let slice = self.reader.read_rest();
+        if !slice[0].is_ascii_digit() {
+            return Err(Error::from(
+                "the final word encoding should start with a digit" ))
+        }
         let word = Self::decode_word(slice)?;
         self.checksum += word;
         Ok(word)

@@ -185,8 +185,6 @@ impl From<Instruction> for Value {
         table.assoc_insert("op", Some(Value::String(this.operation)));
         if let Some(next_value) = this.next.into() {
             table.assoc_insert("next", Some(next_value));
-        } else {
-            table.assoc_insert_dead("next");
         }
         for (key, ReprValue(value)) in this.extra {
             table.assoc_insert(key, Some(value));
