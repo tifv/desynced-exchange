@@ -271,7 +271,7 @@ pub mod operand;
 
 mod test;
 
-const MAX_ASSOC_LOGLEN: u16 = 5;
+const MAX_ASSOC_LOGLEN: u8 = 14;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Exchange<P, B> {

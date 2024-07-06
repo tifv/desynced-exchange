@@ -4,7 +4,7 @@ use std::collections::BTreeMap as SortedMap;
 mod assoc;
 
 use crate::{
-    common::{u32_to_usize, iexp2, ilog2_ceil},
+    common::{u32_to_usize, LogSize, iexp2, ilog2_ceil},
     string::Str,
     table_iter::{TableItem, TableSize},
 };
@@ -69,7 +69,7 @@ impl<V> TableSize for Table<V> {
             .expect("the size should fit")
     }
 
-    fn assoc_loglen(&self) -> Option<u16> {
+    fn assoc_loglen(&self) -> Option<LogSize> {
         self.assoc.loglen()
     }
 
@@ -118,7 +118,7 @@ impl<V> TableBuilder<V> {
     #[must_use]
     pub fn new(
         array_len: u32,
-        assoc_loglen: Option<u16>,
+        assoc_loglen: Option<LogSize>,
     ) -> Self {
         Self {
             array: Vec::with_capacity(u32_to_usize(array_len)),
@@ -621,7 +621,7 @@ impl<V> TryFrom<Table<V>> for Vec<V> {
 pub(super) mod load {
 
 use crate::{
-    common::u32_to_usize,
+    common::{u32_to_usize, LogSize},
     load::Error as LoadError,
 };
 
@@ -639,7 +639,7 @@ pub(in super::super) struct TableLoadBuilder<V> {
 impl<V> TableLoadBuilder<V> {
 
     #[must_use]
-    pub(in super::super) fn new(array_len: u32, assoc_loglen: Option<u16>) -> Self {
+    pub(crate) fn new(array_len: u32, assoc_loglen: Option<LogSize>) -> Self {
         let mut array = Vec::with_capacity(u32_to_usize(array_len));
         array.resize_with(u32_to_usize(array_len), || None);
         Self {
@@ -648,13 +648,13 @@ impl<V> TableLoadBuilder<V> {
         }
     }
 
-    pub(in super::super) fn finish<E: LoadError>(self) -> Result<Table<V>, E> {
+    pub(crate) fn finish<E: LoadError>(self) -> Result<Table<V>, E> {
         let Self { array, assoc } = self;
         let assoc = assoc.finish::<E>()?;
         Ok(Table { array, assoc })
     }
 
-    pub(in super::super) fn array_insert<E: LoadError>( &mut self,
+    pub(crate) fn array_insert<E: LoadError>( &mut self,
         index: u32, value: V,
     ) -> Result<(), E> {
         //! `index` is 0-based
@@ -665,7 +665,7 @@ impl<V> TableLoadBuilder<V> {
         Ok(())
     }
 
-    pub(in super::super) fn assoc_insert<E: LoadError>( &mut self,
+    pub(crate) fn assoc_insert<E: LoadError>( &mut self,
         index: u32, item: AssocItem<V>,
     ) -> Result<(), E> {
         //! `index` is 0-based
@@ -680,7 +680,7 @@ impl<V> TableLoadBuilder<V> {
         Ok(())
     }
 
-    pub(in super::super) fn set_assoc_last_free(&mut self, last_free: u32) {
+    pub(crate) fn set_assoc_last_free(&mut self, last_free: u32) {
         self.assoc.set_last_free(last_free)
     }
 
@@ -691,6 +691,7 @@ impl<V> TableLoadBuilder<V> {
 pub(super) mod dump {
 
 use crate::{
+    common::LogSize,
     dump::{Dump, TableDumpIter as TableDumpIterTr},
     table_iter::{TableItem, TableSize},
 };
@@ -702,7 +703,8 @@ use super::{
 
 impl<V> Table<V> {
     #[must_use]
-    pub(in super::super) fn dump_iter(&self) -> TableDumpIter<'_, V>
+    pub(in super::super)
+    fn dump_iter(&self) -> TableDumpIter<'_, V>
     {
         TableDumpIter {
             array: Some(self.array.iter()),
@@ -724,7 +726,7 @@ impl<'s, V> Clone for TableDumpIter<'s, V> {
 }
 
 impl<'s, V> TableDumpIter<'s, V> {
-    pub(in super::super) fn take_array(&mut self)
+    pub(crate) fn take_array(&mut self)
     -> Option<std::slice::Iter<'s, Option<V>>>
     {
         self.array.take()
@@ -774,7 +776,7 @@ impl<'s, V> TableSize for TableDumpIter<'s, V> {
         let Some(array) = &self.array else { return 0 };
         array.len().try_into().unwrap()
     }
-    fn assoc_loglen(&self) -> Option<u16> {
+    fn assoc_loglen(&self) -> Option<LogSize> {
         self.assoc.loglen()
     }
     fn assoc_last_free(&self) -> u32 {

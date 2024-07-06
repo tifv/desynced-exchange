@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use crate::{
     error::LoadError as Error,
-    common::{iexp2, u32_to_usize},
+    common::{u32_to_usize, LogSize, iexp2},
     table_iter::{
         TableItem, AssocItem,
         TableSize,
@@ -60,7 +60,7 @@ fn error_eof() -> Error {
 
 struct TableHeader {
     pub array_len: u32,
-    pub assoc_loglen: Option<u16>,
+    pub assoc_loglen: Option<LogSize>,
     pub assoc_last_free: u32,
 }
 
@@ -103,6 +103,53 @@ impl<'data> Loader<'data> {
     fn read_slice(&mut self, len: usize) -> Result<&'data [u8], Error> {
         self.reader.read_slice(len)
             .ok_or_else(error_eof)
+    }
+
+    fn read_ext_uint(&mut self) -> Result<u32, Error> {
+        let mut value = 0;
+        let mut shift = 0;
+        loop {
+            let mut next_shift = shift + 8;
+            let mut byte = self.read_byte()?;
+            let continued = (byte & 0x01) > 0;
+            byte >>= 1; next_shift -= 1;
+            if next_shift > 14 {
+                return Err(Error::from("unexpectedly large index"));
+            }
+            value += u32::from(byte) << shift;
+            if !continued {
+                break;
+            }
+            shift = next_shift;
+        }
+        Ok(value)
+    }
+
+    fn read_ext_sint(&mut self) -> Result<i32, Error> {
+        let mut value = 0;
+        let mut negative = None;
+        let mut shift = 0;
+        loop {
+            let mut next_shift = shift + 8;
+            let mut byte = self.read_byte()?;
+            let continued = (byte & 0x01) > 0;
+            byte >>= 1; next_shift -= 1;
+            if negative.is_none() {
+                negative = Some(byte & 0x01 > 0);
+                byte >>= 1; next_shift -= 1;
+            }
+            if next_shift > 14 {
+                return Err(Error::from("unexpectedly large index"));
+            }
+            value += u32::from(byte) << shift;
+            if !continued {
+                break;
+            }
+            shift = next_shift;
+        }
+        let Some(negative) = negative else { unreachable!() };
+        let value = value as i32;
+        Ok(if !negative { value } else { -value })
     }
 
     fn load_nil(&mut self, head: u8) -> Result<(), Error> {
@@ -169,38 +216,43 @@ impl<'data> Loader<'data> {
     ) -> Result<TableHeader, Error> {
         #![allow(clippy::cast_lossless)]
         Ok(match head {
+            0x90 ..= 0x9F =>
+                TableHeader::array((head & 0x0F) as u32),
+            0xDC => TableHeader::array(
+                u16::from_le_bytes(self.read_array::<2>()?) as u32,
+            ),
             0x80 ..= 0x8F => {
-                let mut array_len = 0_u32;
-                if head & 0x01 > 0 {
-                    let mut k = 1_u32;
-                    for () in [(); 2] {
-                        let b = self.read_byte()?;
-                        array_len += ((b >> 1) as u32) * k;
-                        if b & 0x01 > 0 {
-                            k <<= 7;
-                        } else { break }
-                    }
-                }
-                let assoc_loglen = Some(((head & 0x0F) >> 1) as u16);
-                let assoc_last_free = {
-                    let last_free_code = self.read_byte()?;
-                    if last_free_code & 0x01 > 0 {
-                        return Err(Error::from(
-                            "Unrecognized last free index format" ))
-                    }
-                    (last_free_code >> 1) as u32
-                };
+                let has_array_part = head & 0x01 > 0;
+                let array_len = if has_array_part {
+                    self.read_ext_uint()?
+                } else { 0_u32 };
+                let assoc_loglen = Some((head & 0x0F) >> 1);
+                let assoc_last_free = self.read_ext_uint()?;
                 TableHeader {
                     array_len,
                     assoc_loglen,
                     assoc_last_free,
                 }
             },
-            0x90 ..= 0x9F =>
-                TableHeader::array((head & 0x0F) as u32),
-            0xDC => TableHeader::array(
-                u16::from_le_bytes(self.read_array::<2>()?) as u32,
-            ),
+            0xDE => {
+                let next = self.read_byte()?;
+                let has_array_part = next & 0x01 > 0;
+                let assoc_loglen = Some(next >> 1);
+                let 0x00 = self.read_byte()? else {
+                    return Err(error_unexpected());
+                };
+                let array_len = if has_array_part {
+                    self.read_ext_uint()?
+                } else {
+                    return Err(error_unexpected());
+                };
+                let assoc_last_free = self.read_ext_uint()?;
+                TableHeader {
+                    array_len,
+                    assoc_loglen,
+                    assoc_last_free,
+                }
+            },
             _ => return Err(error_unexpected()),
         })
     }
@@ -236,10 +288,6 @@ impl<'data> LoaderTr for &mut Loader<'data> {
             0x80 ..= 0x8F | 0x90 ..= 0x9F | 0xDC => {
                 let TableHeader { array_len, assoc_loglen, assoc_last_free } =
                     self.load_table_header(head)?;
-                if assoc_loglen.is_some_and(|x| x > crate::MAX_ASSOC_LOGLEN) {
-                    return Err(Error::from(
-                        "Encoded table size is too large" ));
-                }
                 self.max_array_len = match
                     self.max_array_len.checked_sub(array_len)
                 {
@@ -247,6 +295,19 @@ impl<'data> LoaderTr for &mut Loader<'data> {
                         "Encoded table size is too large to be correct" )),
                     Some(rest) => rest,
                 };
+                if let Some(assoc_loglen) = assoc_loglen {
+                    if assoc_loglen > crate::MAX_ASSOC_LOGLEN {
+                        return Err(Error::from(
+                            "Encoded table size is too large" ));
+                    }
+                    self.max_array_len = match
+                        self.max_array_len.checked_sub(iexp2(Some(assoc_loglen)))
+                    {
+                        None => return Err(Error::from(
+                            "Encoded table size is too large to be correct" )),
+                        Some(rest) => rest,
+                    };
+                }
                 builder.build_table(SerialReader::new(
                     self,
                     array_len,
@@ -283,7 +344,7 @@ where K: KeyLoad, V: Load
 {
     loader: &'l mut Loader<'data>,
     array_len: u32,
-    assoc_loglen: Option<u16>,
+    assoc_loglen: Option<LogSize>,
     assoc_last_free: u32,
     assoc_len: u32,
     mask: u8, mask_len: u8,
@@ -296,7 +357,7 @@ where K: KeyLoad, V: Load
     fn new(
         loader: &'l mut Loader<'data>,
         array_len: u32,
-        assoc_loglen: Option<u16>, assoc_last_free: u32,
+        assoc_loglen: Option<LogSize>, assoc_last_free: u32,
     ) -> Self {
         Self {
             loader,
@@ -331,14 +392,7 @@ where K: KeyLoad, V: Load
         }
         let value = V::load(&mut *self.loader)?;
         let key = K::load_key(&mut *self.loader)?;
-        let link_code = self.loader.read_byte()?;
-        if link_code & 0x01 > 0 {
-            return Err(Error::from("unexpected link code"));
-        }
-        let mut link: i32 = (link_code >> 2).into();
-        if link_code & 0x02 > 0 {
-            link = -link;
-        }
+        let link = self.loader.read_ext_sint()?;
         if let Some(key) = key {
             Ok(Some(TableItem::Assoc(AssocItem::Live { value, key, link })))
         } else {
@@ -357,7 +411,7 @@ where K: KeyLoad, V: Load
     fn array_len(&self) -> u32 {
         self.array_len
     }
-    fn assoc_loglen(&self) -> Option<u16> {
+    fn assoc_loglen(&self) -> Option<LogSize> {
         self.assoc_loglen
     }
     fn assoc_last_free(&self) -> u32 {

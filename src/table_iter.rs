@@ -4,6 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::common::LogSize;
+
 #[derive(Debug, Clone)]
 #[allow(clippy::exhaustive_enums)]
 pub enum TableItem<K, V> {
@@ -63,7 +65,7 @@ pub trait TableSize {
     #[must_use]
     fn array_len(&self) -> u32;
     #[must_use]
-    fn assoc_loglen(&self) -> Option<u16>;
+    fn assoc_loglen(&self) -> Option<LogSize>;
     #[must_use]
     fn assoc_last_free(&self) -> u32;
 }

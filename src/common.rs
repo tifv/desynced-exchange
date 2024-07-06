@@ -8,9 +8,11 @@ pub const fn u32_to_usize(len: u32) -> usize {
     len as usize
 }
 
+pub type LogSize = u8;
+
 #[must_use]
 #[inline]
-pub const fn iexp2(loglen: Option<u16>) -> u32 {
+pub const fn iexp2(loglen: Option<LogSize>) -> u32 {
     let Some(loglen) = loglen else { return 0 };
     match 1_u32.checked_shl(loglen as u32) {
         Some(exp) if exp - 1 <= (i32::MAX as u32) => exp,
@@ -21,7 +23,7 @@ pub const fn iexp2(loglen: Option<u16>) -> u32 {
 
 #[must_use]
 #[inline]
-pub const fn ilog2_ceil(len: usize) -> Option<u16> {
+pub const fn ilog2_ceil(len: usize) -> Option<LogSize> {
     //! Upper-rounded base 2 logarithm.
     //! Returns `None` if `len` is zero.
     let Some(mut ilog2) = len.checked_ilog2() else {
@@ -30,12 +32,12 @@ pub const fn ilog2_ceil(len: usize) -> Option<u16> {
     if ilog2 > len.trailing_zeros() {
         ilog2 += 1;
     }
-    Some(ilog2 as u16)
+    Some(ilog2 as u8)
 }
 
 #[must_use]
 #[inline]
-pub const fn ilog2_exact(len: usize) -> Option<u16> {
+pub const fn ilog2_exact(len: usize) -> Option<LogSize> {
     //! Base 2 logarithm.
     //! Returns `None` if `len` is not a power of two.
     let Some(ilog2) = len.checked_ilog2() else {
@@ -44,7 +46,7 @@ pub const fn ilog2_exact(len: usize) -> Option<u16> {
     if ilog2 > len.trailing_zeros() {
         return None;
     }
-    Some(ilog2 as u16)
+    Some(ilog2 as u8)
 }
 
 #[inline]

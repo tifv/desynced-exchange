@@ -1,5 +1,5 @@
 use crate::{
-    common::iexp2,
+    common::{LogSize, iexp2},
     error::DumpError as Error,
     table_iter::{TableItem, AssocItem},
     dump::{
@@ -14,7 +14,7 @@ pub(crate) mod compress;
 mod writer;
 use writer::Writer;
 
-const EXCEEDED_LOGLEN: u16 = crate::MAX_ASSOC_LOGLEN + 1;
+const EXCEEDED_LOGLEN: LogSize = crate::MAX_ASSOC_LOGLEN + 1;
 
 pub fn dump_blueprint<P, B>(exchange: Exchange<Option<P>, Option<B>>)
 -> Result<String, Error>
@@ -35,6 +35,11 @@ where P: Dump, B: Dump
         Ok(dumper.finish())
     }
     exchange.map(dump, dump).transpose()
+}
+
+#[inline]
+const fn mask(loglen: u8) -> u32 {
+    (1_u32 << loglen) - 1
 }
 
 pub(super) struct Dumper {
@@ -67,6 +72,50 @@ impl Dumper {
     }
 
     #[inline]
+    fn write_ext_uint(&mut self, mut value: u32) {
+        assert!(value.checked_ilog2() < Some(14));
+        loop {
+            let shift = 7;
+            let mut byte = (value & mask(shift)) as u8;
+            value >>= shift;
+            let continued = value > 0;
+            byte = (byte << 1) | u8::from(continued);
+            self.write_byte(byte);
+            if !continued {
+                break;
+            }
+        }
+    }
+
+    #[inline]
+    fn write_ext_sint(&mut self, value: i32) {
+        let (mut negative, mut value) = if value >= 0 {
+            (Some(false), value as u32)
+        } else {
+            (Some(true), value.wrapping_neg() as u32)
+        };
+        assert!(value.checked_ilog2() < Some(14));
+        loop {
+            let mut shift = 7;
+            let negative = negative.take();
+            if negative.is_some() {
+                shift -= 1;
+            }
+            let mut byte = (value & mask(shift)) as u8;
+            value >>= shift;
+            let continued = value > 0;
+            if let Some(negative) = negative {
+                byte = (byte << 1) | u8::from(negative);
+            }
+            byte = (byte << 1) | u8::from(continued);
+            self.write_byte(byte);
+            if !continued {
+                break;
+            }
+        }
+    }
+
+    #[inline]
     fn dump_table_header<'v, T>(&mut self, table: &T) -> Result<(), Error>
     where T: TableDumpIter<'v>, T::Key: KeyDump
     {
@@ -79,24 +128,28 @@ impl Dumper {
                 self.write_byte(0xDC);
                 self.write_array::<2>((len as u16).to_le_bytes());
             },
-            (0, Some(logsize @ 0 ..= 0x7)) => {
-                self.write_byte(0x80 | ((logsize << 1) as u8));
-                self.write_byte((table.assoc_last_free() << 1) as u8);
+            (len @ 0 ..= 0x_3FFF, Some(logsize @ 0 ..= 0x7)) => {
+                let has_array = len > 0;
+                self.write_byte(0x80 | u8::from(has_array) | (logsize << 1));
+                if has_array {
+                    self.write_ext_uint(len);
+                }
+                self.write_ext_uint(table.assoc_last_free());
             },
-            (len @ 0x01 ..= 0x7F, Some(logsize @ 0 ..= 0x5)) => {
-                self.write_byte(0x81 | ((logsize << 1) as u8));
-                self.write_byte((len << 1) as u8);
-                self.write_byte((table.assoc_last_free() << 1) as u8);
+            (len @ 1 ..= 0x_3FFF, Some(logsize @ 0 ..= 0x0E)) => {
+                self.write_byte(0xDE);
+                let has_array = len > 0;
+                self.write_byte(u8::from(has_array) | (logsize << 1));
+                self.write_byte(0x00);
+                if has_array {
+                    self.write_ext_uint(len);
+                }
+                self.write_ext_uint(table.assoc_last_free());
             },
-            (len @ 0x_0080 ..= 0x_3FFF, Some(logsize @ 0 ..= 0x5)) => {
-                self.write_byte(0x81 | ((logsize << 1) as u8));
-                self.write_byte(((len & ((1 <<  7) - (1 << 0))) << 1) as u8 + 1);
-                self.write_byte(((len & ((1 << 14) - (1 << 7))) >> 6) as u8);
-                self.write_byte((table.assoc_last_free() << 1) as u8);
-            },
+            (0x0, Some(8_u8 ..= 16_u8)) | // temporary
             (0x1_0000 ..= u32::MAX, None) |
             (0x4000 ..= u32::MAX, Some(_)) |
-            (_, Some(self::EXCEEDED_LOGLEN ..= u16::MAX)) =>
+            (_, Some(self::EXCEEDED_LOGLEN ..= LogSize::MAX)) =>
                 return Err(Error::from("unsupported table size")),
         }
         Ok(())
@@ -303,22 +356,11 @@ where K: KeyDump, V: Dump
                 None => self.dumper.dump_dead_key()?,
                 Some(key) => key.dump_key(&mut *self.dumper)?,
             }
-            self.dumper.write_byte(match Self::encode_link(link) {
-                Some(code) => code,
-                None => return Err(Error::from("unsupported table size"))
-            });
+            self.dumper.write_ext_sint(link);
         }
         self.len = 0;
         self.mask = 0;
         Ok(())
-    }
-    fn encode_link(link: i32) -> Option<u8> {
-        match link {
-            0 => Some(0),
-            1 ..= 0b_0011_1111 => Some((link << 2) as u8),
-            -0b_0011_1111 ..= -1 => Some(((-link) << 2) as u8 + 0x02),
-            _ => None,
-        }
     }
     fn end(mut self) -> Result<(), Error> {
         if self.len > 0 {

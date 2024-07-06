@@ -1,13 +1,13 @@
 //! Associative part of the tables
 
 use crate::{
-    common::{ilog2_exact, iexp2, u32_to_usize},
+    common::{u32_to_usize, LogSize, ilog2_exact, iexp2},
     load::Error as LoadError,
 };
 use super::Key;
 
 #[inline]
-const fn mask(loglen: u16) -> u32 {
+const fn mask(loglen: LogSize) -> u32 {
     iexp2(Some(loglen)) - 1
 }
 
@@ -37,7 +37,7 @@ pub(crate) const fn str_table_hash(value: &str) -> u32 {
 }
 
 // https://www.lua.org/source/5.4/ltable.c.html#hashint
-pub(crate) const fn int_table_hash(value: i32, loglen: u16) -> u32 {
+pub(crate) const fn int_table_hash(value: i32, loglen: LogSize) -> u32 {
     if loglen == 0 { return 0; }
     if value >= 0 {
         (value % (mask(loglen) as i32)) as u32
@@ -50,7 +50,7 @@ pub(crate) type Item<V> = crate::table_iter::AssocItem<Key, V>;
 
 impl Key {
     #[inline]
-    fn position(&self, loglen: u16) -> u32 {
+    fn position(&self, loglen: LogSize) -> u32 {
         match *self {
             Self::Index(index) => int_table_hash(index, loglen),
             Self::Name(ref value) => str_table_hash(value) & mask(loglen),
@@ -59,7 +59,7 @@ impl Key {
 }
 
 impl<V> Item<V> {
-    fn main_position(&self, loglen: u16) -> Option<u32> {
+    fn main_position(&self, loglen: LogSize) -> Option<u32> {
         match self {
             Self::Dead { .. } => None,
             Self::Live { key, .. } => Some(key.position(loglen))
@@ -93,7 +93,7 @@ pub(super) struct Table<V> {
 }
 
 impl<V> Table<V> {
-    pub(super) fn new(loglen: Option<u16>) -> Self {
+    pub(super) fn new(loglen: Option<LogSize>) -> Self {
         let size = iexp2(loglen);
         let items = (size > 0).then(|| {
             let mut items = Vec::with_capacity(size as usize);
@@ -105,7 +105,7 @@ impl<V> Table<V> {
             last_free: size,
         }
     }
-    pub(super) fn loglen(&self) -> Option<u16> {
+    pub(super) fn loglen(&self) -> Option<LogSize> {
         let items = self.items.as_ref()?;
         // SAFETY: `items` has a size of a power of two
         Some(unsafe { ilog2_exact(items.len()).unwrap_unchecked() })
@@ -188,11 +188,11 @@ enum InsertItem<V> {
 
 impl<V> InsertItem<V> {
     #[inline]
-    fn dead_from_key(key: Key, loglen: u16) -> Self {
+    fn dead_from_key(key: Key, loglen: LogSize) -> Self {
         Self::Dead { position: key.position(loglen) }
     }
     #[inline]
-    fn position(&self, loglen: u16) -> u32 {
+    fn position(&self, loglen: LogSize) -> u32 {
         match *self {
             Self::Dead { position } => position & mask(loglen),
             Self::Live { ref key, .. } => key.position(loglen),
@@ -214,7 +214,7 @@ pub(super) struct TableBuilder<V> {
 
 impl<V> TableBuilder<V> {
 
-    pub(super) fn new(loglen: Option<u16>) -> Self {
+    pub(super) fn new(loglen: Option<LogSize>) -> Self {
         Self { table: Table::new(loglen) }
     }
 
@@ -407,7 +407,7 @@ impl<'s, V> Iterator for TableSortedIter<'s, V> {
 pub(super) mod load {
 
 use crate::{
-    common::u32_to_usize,
+    common::{u32_to_usize, LogSize},
     load::Error,
 };
 
@@ -420,11 +420,11 @@ pub(in super::super) struct TableLoadBuilder<V> {
 
 impl<V> TableLoadBuilder<V> {
 
-    pub(in super::super) fn new(loglen: Option<u16>) -> Self {
+    pub(crate) fn new(loglen: Option<LogSize>) -> Self {
         Self { table: Table::new(loglen) }
     }
 
-    pub(in super::super) fn finish<E: Error>(self)
+    pub(crate) fn finish<E: Error>(self)
     -> Result<Table<V>, E>
     {
         #[allow(clippy::assertions_on_constants)]
@@ -441,14 +441,14 @@ impl<V> TableLoadBuilder<V> {
         Ok(self.table)
     }
 
-    pub(in super::super) fn insert(&mut self, index: u32, item: Item<V>) {
+    pub(crate) fn insert(&mut self, index: u32, item: Item<V>) {
         let items = self.table.items.as_mut().unwrap();
         let index = u32_to_usize(index);
         let old_item = items[index].replace(item);
         assert!(old_item.is_none());
     }
 
-    pub(in super::super) fn set_last_free(&mut self, last_free: u32) {
+    pub(crate) fn set_last_free(&mut self, last_free: u32) {
         self.table.last_free = last_free;
     }
 
@@ -457,6 +457,8 @@ impl<V> TableLoadBuilder<V> {
 }
 
 pub(super) mod dump {
+
+use crate::common::LogSize;
 
 use super::{Item, Table};
 
@@ -474,7 +476,7 @@ impl<V> Table<V> {
 
 pub(in super::super) struct TableDumpIter<'s, V> {
     items: std::slice::Iter<'s, Option<Item<V>>>,
-    loglen: Option<u16>,
+    loglen: Option<LogSize>,
     last_free: u32,
 }
 
@@ -489,7 +491,7 @@ impl<'s, V> Clone for TableDumpIter<'s, V> {
 }
 
 impl<'s, V> TableDumpIter<'s, V> {
-    pub(crate) fn loglen(&self) -> Option<u16> {
+    pub(crate) fn loglen(&self) -> Option<LogSize> {
         self.loglen
     }
     pub(crate) fn last_free(&self) -> u32 {
@@ -533,7 +535,7 @@ use std::slice;
 
 use crate::{
     error::LoadError,
-    common::ilog2_ceil,
+    common::{LogSize, ilog2_ceil},
     string::Str,
 };
 
@@ -543,7 +545,7 @@ use super::TableBuilder;
 
 fn test_positions_for_keys_with_len<S>(
     keys: impl Iterator<Item=S>,
-    loglen: Option<u16>,
+    loglen: Option<LogSize>,
 )
 where Str: From<S>,
 {
