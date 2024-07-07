@@ -249,6 +249,7 @@
 use ::serde::{Deserialize, Serialize};
 
 mod common;
+mod byteseq;
 mod ascii;
 mod intlim;
 mod serde;
@@ -274,7 +275,7 @@ mod test;
 const MAX_ASSOC_LOGLEN: u8 = 14;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-pub enum Exchange<P, B> {
+pub enum Exchange<P, B = P> {
     Blueprint(P),
     Behavior(B),
 }
@@ -304,8 +305,8 @@ impl<P, B> Exchange<P, B> {
     }
 }
 
-impl<V> Exchange<V, V> {
-    pub fn map_mono<V1, F>(self, f: F) -> Exchange<V1, V1>
+impl<V> Exchange<V> {
+    pub fn map_mono<V1, F>(self, f: F) -> Exchange<V1>
     where F: FnOnce(V) -> V1,
     {
         match self {

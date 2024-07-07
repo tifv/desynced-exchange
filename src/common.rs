@@ -1,3 +1,6 @@
+use std::mem::MaybeUninit;
+
+
 #[must_use]
 #[inline]
 pub const fn u32_to_usize(len: u32) -> usize {
@@ -49,6 +52,7 @@ pub const fn ilog2_exact(len: usize) -> Option<LogSize> {
     Some(ilog2 as u8)
 }
 
+
 #[inline]
 pub(crate) unsafe fn ptr_sub<T>(more: *const T, less: *const T) -> usize {
     //! # Safety
@@ -67,6 +71,7 @@ pub(crate) unsafe fn ptr_sub<T>(more: *const T, less: *const T) -> usize {
     diff as usize
 }
 
+
 /// # Safety
 /// The implementer must ensure that
 /// `Self` is `repr(transparent)` over `Self::Target` and
@@ -83,6 +88,103 @@ pub(crate) unsafe trait TransparentRef : AsRef<Self::Target> + Sized {
         std::mem::forget(self);
         // SAFETY: `Self` is `repr(transparent)` over `Target`
         unsafe { this.cast::<Self::Target>().read() }
+    }
+}
+
+
+pub(crate) fn map_result<const N: usize, T, V, F, E>(array: [T; N], mut f: F)
+-> Result<[V; N], E>
+where
+    V: Default,
+    F: FnMut(T) -> Result<V, E>
+{
+    let mut err = None;
+    let array = array.map(|x| match f(x) {
+        Ok(y) => y,
+        Err(e) => { err = Some(e); V::default() },
+    });
+    if let Some(err) = err {
+        return Err(err);
+    }
+    Ok(array)
+}
+
+
+pub(crate) struct ConstSlice<const N: usize, T> {
+    // SAFETY-BEARING invariant:
+    // `array[start .. end]` is initialized.
+    start: usize, end: usize,
+    array: [MaybeUninit<T>; N],
+}
+
+impl<const N: usize, T: Clone> Clone for ConstSlice<N, T> {
+    fn clone(&self) -> Self {
+        let &Self { start, end, ref array } = self;
+        if !(start <= end && end <= N) {
+            // SAFETY: struct invariant
+            unsafe { std::hint::unreachable_unchecked() }
+        }
+        let mut cloned_array = Self::new_array();
+        for i in start .. end {
+            // SAFETY: struct invariant
+            cloned_array[i].write(unsafe {
+                array[i].assume_init_ref().clone()
+            });
+        }
+        Self { start, end, array: cloned_array }
+    }
+}
+
+impl<const N: usize, T> std::ops::Deref for ConstSlice<N, T> {
+    type Target = [T];
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        let &Self { start, end, ref array } = self;
+        // SAFETY: struct invariant
+        unsafe { &*(
+            std::ptr::addr_of!(array[start .. end])
+            as *const [T]
+        ) }
+    }
+}
+
+impl<const N: usize, T> Drop for ConstSlice<N, T> {
+    fn drop(&mut self) {
+        let &mut Self { start, end, ref mut array } = self;
+        for value in &mut array[start .. end] {
+            // SAFETY: struct invariant
+            unsafe { value.assume_init_drop() }
+        }
+    }
+}
+
+impl<const N: usize, T> ConstSlice<N, T> {
+    #[inline]
+    fn new_array() -> [MaybeUninit<T>; N] {
+        [(); N].map(|()| MaybeUninit::uninit())
+    }
+    #[inline]
+    pub(crate) fn new() -> Self {
+        Self { start: 0, end: 0, array: Self::new_array() }
+    }
+    pub(crate) fn from_slice(slice: &[T]) -> Self
+    where T: Clone
+    {
+        let len = slice.len();
+        assert!(len <= N);
+        let mut this = Self::new();
+        for (i, v) in slice.iter().enumerate() {
+            this.array[i].write(v.clone());
+        }
+        this.end = len;
+        this
+    }
+    #[inline]
+    pub(crate) fn push(&mut self, value: T) {
+        let end = self.end;
+        assert!(end < N);
+        self.array[end].write(value);
+        self.end = end + 1;
     }
 }
 

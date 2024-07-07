@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use crate::{
     error::LoadError as Error,
     common::{u32_to_usize, LogSize, iexp2},
+    byteseq::Read,
     table_iter::{
         TableItem, AssocItem,
         TableSize,
@@ -17,9 +18,6 @@ use crate::{
 
 pub(crate) mod decompress;
 
-mod reader;
-use reader::Reader;
-
 pub fn load_blueprint<P, B, E>(exchange: &str)
 -> Result<Exchange<Option<P>, Option<B>>, Error>
 where P: Load, B: Load,
@@ -27,24 +25,24 @@ where P: Load, B: Load,
     decode_blueprint(decompress::decompress(exchange)?)
 }
 
-pub(crate) fn decode_blueprint<P, B>(encoded_data: Exchange<Vec<u8>,Vec<u8>>)
+pub(crate) fn decode_blueprint<P, B>(encoded_data: Exchange<Vec<u8>>)
 -> Result<Exchange<Option<P>, Option<B>>, Error>
 where P: Load, B: Load,
 {
     Ok(match encoded_data {
         Exchange::Blueprint(encoded_body) =>
             Exchange::Blueprint(P::load(
-                &mut Loader::new(&encoded_body)
+                &mut Loader::new(encoded_body.as_slice())
             )?),
         Exchange::Behavior (encoded_body) =>
             Exchange::Behavior (B::load(
-                &mut Loader::new(&encoded_body)
+                &mut Loader::new(encoded_body.as_slice())
             )?),
     })
 }
 
-pub struct Loader<'data> {
-    reader: Reader<'data>,
+pub struct Loader<R: Read<u8>> {
+    reader: R,
     max_array_len: u32,
 }
 
@@ -74,13 +72,12 @@ impl TableHeader {
     }
 }
 
-impl<'data> Loader<'data> {
+impl<R: Read<u8>> Loader<R> {
 
     #[must_use]
-    pub fn new(data: &'data [u8]) -> Self {
+    pub fn new(reader: R) -> Self {
         // The most compact representation of an array element
         // is bitmask, which is eight (nil) elements per one byte.
-        let reader = Reader::from_slice(data);
         let max_array_len = u32::try_from(reader.len())
             .unwrap_or(u32::MAX)
             .saturating_mul(8);
@@ -100,7 +97,7 @@ impl<'data> Loader<'data> {
             .ok_or_else(error_eof)
     }
 
-    fn read_slice(&mut self, len: usize) -> Result<&'data [u8], Error> {
+    fn read_slice(&mut self, len: usize) -> Result<&[u8], Error> {
         self.reader.read_slice(len)
             .ok_or_else(error_eof)
     }
@@ -199,7 +196,7 @@ impl<'data> Loader<'data> {
 
     fn load_string( &mut self,
         head: u8,
-    ) -> Result<&'data str, Error> {
+    ) -> Result<&str, Error> {
         #![allow(clippy::cast_lossless)]
         let len = match head {
             head @ 0xA0 ..= 0xBF => (head & 0x1F) as u32,
@@ -259,7 +256,7 @@ impl<'data> Loader<'data> {
 
 }
 
-impl<'data> LoaderTr for &mut Loader<'data> {
+impl<R: Read<u8>> LoaderTr for &mut Loader<R> {
     type Error = Error;
 
     fn load_value<B>(self, builder: B)
@@ -339,10 +336,10 @@ impl<'data> LoaderTr for &mut Loader<'data> {
 
 }
 
-struct SerialReader<'l, 'data: 'l, K, V>
-where K: KeyLoad, V: Load
+struct SerialReader<'l, R, K, V>
+where R: Read<u8>, K: KeyLoad, V: Load
 {
-    loader: &'l mut Loader<'data>,
+    loader: &'l mut Loader<R>,
     array_len: u32,
     assoc_loglen: Option<LogSize>,
     assoc_last_free: u32,
@@ -351,11 +348,11 @@ where K: KeyLoad, V: Load
     output: PhantomData<TableItem<K, V>>,
 }
 
-impl<'l, 'data: 'l, K, V> SerialReader<'l, 'data, K, V>
-where K: KeyLoad, V: Load
+impl<'l, R, K, V> SerialReader<'l, R, K, V>
+where R: Read<u8>, K: KeyLoad, V: Load
 {
     fn new(
-        loader: &'l mut Loader<'data>,
+        loader: &'l mut Loader<R>,
         array_len: u32,
         assoc_loglen: Option<LogSize>, assoc_last_free: u32,
     ) -> Self {
@@ -405,8 +402,8 @@ where K: KeyLoad, V: Load
     }
 }
 
-impl<'l, 'data: 'l, K, V> TableSize for SerialReader<'l, 'data, K, V>
-where K: KeyLoad, V: Load
+impl<'l, R, K, V> TableSize for SerialReader<'l, R, K, V>
+where R: Read<u8>, K: KeyLoad, V: Load
 {
     fn array_len(&self) -> u32 {
         self.array_len
@@ -419,8 +416,8 @@ where K: KeyLoad, V: Load
     }
 }
 
-impl<'l, 'data: 'l, K, V> Iterator for SerialReader<'l, 'data, K, V>
-where K: KeyLoad, V: Load
+impl<'l, R, K, V> Iterator for SerialReader<'l, R, K, V>
+where R: Read<u8>, K: KeyLoad, V: Load
 {
     type Item = Result<Option<TableItem<K, V>>, Error>;
     fn next(&mut self) -> Option<Self::Item> {
@@ -436,8 +433,8 @@ where K: KeyLoad, V: Load
     }
 }
 
-impl<'l, 'data: 'l, K, V> TableLoader for SerialReader<'l, 'data, K, V>
-where K: KeyLoad, V: Load
+impl<'l, R, K, V> TableLoader for SerialReader<'l, R, K, V>
+where R: Read<u8>, K: KeyLoad, V: Load
 {
     type Key = K;
     type Value = V;

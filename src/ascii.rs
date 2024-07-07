@@ -264,6 +264,7 @@ impl<'s> From<&'s AsciiStr> for &'s str {
 pub(crate) struct AsciiArray<const N: usize>(pub [Ascii; N]);
 
 impl<const N: usize> AsciiArray<N> {
+    #[allow(dead_code)]
     pub(crate) unsafe fn from_bytes_unchecked(
         value: [u8; N],
     ) -> AsciiArray<N> {

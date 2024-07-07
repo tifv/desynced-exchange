@@ -4,11 +4,16 @@ use std::hint::unreachable_unchecked;
 
 use thiserror::Error;
 
+use crate::{
+    error::LoadError,
+    common::map_result,
+    ascii::{Ascii, char as ascii_char},
+    byteseq::Write,
+};
+
 #[derive(Debug, Error)]
 #[error("Integer base conversion error")]
 pub(crate) struct IntLimError;
-
-use crate::ascii::Ascii;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 // SAFETY_BEARING invariant:
@@ -64,7 +69,7 @@ impl<const L: u8> IntLim<L> {
 
     #[inline]
     #[must_use]
-    pub(crate) const fn be_decompose<const N: usize>(
+    pub(crate) const fn u32_be_decompose<const N: usize>(
         value: u32 ) -> (usize, [Self; N])
     {
         //! Returns `(leading_zeros, digits)`
@@ -93,7 +98,7 @@ impl<const L: u8> IntLim<L> {
     }
 
     #[inline]
-    pub(crate) const fn be_compose(
+    pub(crate) const fn u32_be_compose(
         value: &[Self] ) -> Result<u32, IntLimError>
     {
         let mut result: u32 = 0;
@@ -114,7 +119,7 @@ impl<const L: u8> IntLim<L> {
 
     #[inline]
     #[must_use]
-    pub(crate) const fn sufficient_digits() -> usize {
+    pub(crate) const fn u32_sufficient_digits() -> usize {
         (u32::MAX.ilog(L as u32) + 1) as usize
     }
 
@@ -203,6 +208,165 @@ impl Int62 {
     }
 }
 
+
+pub(crate) trait CheckSum<V> {
+    fn add(&mut self, value: V);
+}
+
+impl CheckSum<u32> for std::num::Wrapping<u32> {
+    fn add(&mut self, value: u32) {
+        *self += value;
+    }
+}
+
+const U32_LEN: usize = (u32::BITS / u8::BITS) as usize;
+const U32_ENCODED_LEN: usize = Int62::u32_sufficient_digits();
+
+pub(crate) struct Base62Encode<W, CS>
+where W: Write<Ascii>, CS: CheckSum<u32>
+{
+    writer: W,
+    buffer: [u8; U32_LEN],
+    buffer_len: usize,
+    checksum: CS,
+}
+
+impl<W, CS> Base62Encode<W, CS>
+where W: Write<Ascii>, CS: CheckSum<u32>
+{
+    pub(crate) fn new(writer: W, checksum: CS) -> Self {
+        Self { writer, buffer: [0; U32_LEN], buffer_len: 0, checksum }
+    }
+    #[inline]
+    fn write_part(&mut self, slice: &[u8]) -> usize {
+        assert!(self.buffer_len < U32_LEN);
+        let read_len = usize::min(U32_LEN - self.buffer_len, slice.len());
+        self.buffer[self.buffer_len .. self.buffer_len + read_len]
+            .copy_from_slice(&slice[..read_len]);
+        self.buffer_len += read_len;
+        if self.buffer_len == U32_LEN {
+            self.encode_word();
+        }
+        read_len
+    }
+    #[inline]
+    fn encode_word(&mut self) {
+        #[allow(clippy::assertions_on_constants)]
+        { assert!(U32_ENCODED_LEN == 6); }
+        let encoded_len = match self.buffer_len {
+            1 => 2,
+            2 => 3,
+            3 => 5,
+            4 => 6,
+            _ => unreachable!(),
+        };
+        let word = u32::from_le_bytes(self.buffer);
+        self.buffer = [0; U32_LEN];
+        self.buffer_len = 0;
+        self.checksum.add(word);
+        let (start, encoded_word) = Int62::u32_be_decompose(word);
+        assert!(start >= U32_ENCODED_LEN - encoded_len);
+        let encoded_word: [_; U32_ENCODED_LEN] =
+            encoded_word.map(encode_base62);
+        self.writer.write_slice(
+            &encoded_word[U32_ENCODED_LEN - encoded_len ..] );
+    }
+    pub(crate) fn end(mut self) -> (W, CS) {
+        if self.buffer_len > 0 {
+            self.encode_word();
+        }
+        let Self { writer, buffer_len, checksum, .. } = self;
+        assert!(buffer_len == 0);
+        (writer, checksum)
+    }
+}
+
+impl<W, CS> Write<u8> for Base62Encode<W, CS>
+where W: Write<Ascii>, CS: CheckSum<u32>
+{
+    fn write_slice(&mut self, mut slice: &[u8]) {
+        while !slice.is_empty() {
+            let written_len = self.write_part(slice);
+            slice = &slice[written_len..];
+        }
+    }
+}
+
+pub(crate) struct Base62Decode<W, CS>
+where W: Write<u8>, CS: CheckSum<u32>
+{
+    writer: W,
+    buffer: [Ascii; U32_ENCODED_LEN],
+    buffer_len: usize,
+    checksum: CS,
+}
+
+impl<W, CS> Base62Decode<W, CS>
+where W: Write<u8>, CS: CheckSum<u32>
+{
+    pub(crate) fn new(writer: W, checksum: CS) -> Self {
+        Self {
+            writer,
+            buffer: [ascii_char!('0'); U32_ENCODED_LEN], buffer_len: 0,
+            checksum }
+    }
+    #[inline]
+    fn write_part(&mut self, slice: &[Ascii]) -> Result<usize, LoadError> {
+        assert!(self.buffer_len < U32_ENCODED_LEN);
+        let read_len = usize::min(U32_ENCODED_LEN - self.buffer_len, slice.len());
+        self.buffer[self.buffer_len .. self.buffer_len + read_len]
+            .copy_from_slice(&slice[..read_len]);
+        self.buffer_len += read_len;
+        if self.buffer_len == U32_ENCODED_LEN {
+            self.decode_word()?;
+        }
+        Ok(read_len)
+    }
+    #[inline]
+    fn decode_word(&mut self) -> Result<(), LoadError> {
+        #[allow(clippy::assertions_on_constants)]
+        { assert!(U32_ENCODED_LEN == 6); }
+        let decoded_len = match self.buffer_len {
+            2 => 1,
+            3 => 2,
+            5 => 3,
+            6 => 4,
+            1 | 4 => return Err(LoadError::from(
+                "encoded word should be of length 2, 3, 5, or 6" )),
+            _ => unreachable!(),
+        };
+        let decoded_max = 1_u32.checked_shl((decoded_len as u32) * 8)
+            .unwrap_or(u32::MAX);
+        let word = Int62::u32_be_compose(
+            &map_result(self.buffer, decode_base62)?[..self.buffer_len] )?;
+        self.buffer = [ascii_char!('0'); U32_ENCODED_LEN];
+        self.buffer_len = 0;
+        if word > decoded_max {
+            return Err(LoadError::from("Decoded integer is too large"));
+        }
+        self.checksum.add(word);
+        self.writer.write_slice(&word.to_le_bytes()[..decoded_len]);
+        Ok(())
+    }
+    pub(crate) fn end(mut self) -> Result<(W, CS), LoadError> {
+        if self.buffer_len > 0 {
+            self.decode_word()?;
+        }
+        let Self { writer, buffer_len, checksum, .. } = self;
+        assert!(buffer_len == 0);
+        Ok((writer, checksum))
+    }
+    pub(crate) fn write_slice(&mut self, mut slice: &[Ascii])
+    -> Result<(), LoadError> {
+        while !slice.is_empty() {
+            let written_len = self.write_part(slice)?;
+            slice = &slice[written_len..];
+        }
+        Ok(())
+    }
+}
+
+
 #[cfg(test)]
 mod test {
     use crate::{ascii::{Ascii, AsciiStr}, intlim::IntLimError};
@@ -217,10 +381,10 @@ mod test {
     #[test]
     fn test_decompose_10() {
         const L: u8 = 10;
-        const D: usize = IntLim::<L>::sufficient_digits();
+        const D: usize = IntLim::<L>::u32_sufficient_digits();
         assert_eq!(D, 10);
         assert_eq!(
-            IntLim::<L>::be_decompose::<10>(u32::MAX),
+            IntLim::<L>::u32_be_decompose::<10>(u32::MAX),
             (0, [4,2,9,4,9,6,7,2,9,5].map(IntLim::<L>)),
         );
     }
@@ -228,10 +392,10 @@ mod test {
     #[test]
     fn test_decompose_62() {
         const L: u8 = 62;
-        const D: usize = IntLim::<L>::sufficient_digits();
+        const D: usize = IntLim::<L>::u32_sufficient_digits();
         assert_eq!(D, 6);
         assert_eq!(
-            IntLim::<L>::be_decompose::<D>(u32::MAX),
+            IntLim::<L>::u32_be_decompose::<D>(u32::MAX),
             (0, [  4, 42, 41, 15, 12,  3].map(IntLim::<L>)),
         );
     }
@@ -239,14 +403,14 @@ mod test {
     #[test]
     fn test_decompose_31() {
         const L: u8 = 31;
-        const D: usize = IntLim::<L>::sufficient_digits();
+        const D: usize = IntLim::<L>::u32_sufficient_digits();
         assert_eq!(D, 7);
         assert_eq!(
-            IntLim::<L>::be_decompose::<7>(0),
+            IntLim::<L>::u32_be_decompose::<7>(0),
             (7, [0,0,0,0,0,0,0].map(IntLim::<L>)),
         );
         assert_eq!(
-            IntLim::<L>::be_decompose::<7>(u32::MAX),
+            IntLim::<L>::u32_be_decompose::<7>(u32::MAX),
             (0, [  4, 26,  0, 19, 29, 24,  3].map(IntLim::<L>)),
         );
     }
@@ -267,8 +431,8 @@ mod test {
     #[test]
     fn test_encode_base62_seq() {
         fn encode(value: u32) -> String {
-            const D: usize = Int62::sufficient_digits();
-            let x = Int62::be_decompose::<D>(value).1.map(encode_base62);
+            const D: usize = Int62::u32_sufficient_digits();
+            let x = Int62::u32_be_decompose::<D>(value).1.map(encode_base62);
             String::from(<&str>::from(<&AsciiStr>::from(x.as_slice())))
         }
         assert_eq!(encode(u32::MAX     ), "4gfFC3");
@@ -310,7 +474,7 @@ mod test {
                 .map(|b| Ascii::try_from(b).unwrap())
                 .map(|c| decode_base62(c).unwrap() )
                 .collect::<Vec<_>>();
-            Int62::be_compose(&digits).unwrap()
+            Int62::u32_be_compose(&digits).unwrap()
         }
         assert_eq!(decode("4gfFC3"), u32::MAX     );
         assert_eq!(decode("15ftgG"), 1_000_000_000);

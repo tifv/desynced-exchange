@@ -1,5 +1,6 @@
 use crate::{
     common::{LogSize, iexp2},
+    byteseq::Write,
     error::DumpError as Error,
     table_iter::{TableItem, AssocItem},
     dump::{
@@ -10,9 +11,6 @@ use crate::{
 };
 
 pub(crate) mod compress;
-
-mod writer;
-use writer::Writer;
 
 const EXCEEDED_LOGLEN: LogSize = crate::MAX_ASSOC_LOGLEN + 1;
 
@@ -25,12 +23,12 @@ where P: Dump, B: Dump
 }
 
 pub(crate) fn encode_blueprint<P, B>(exchange: Exchange<Option<P>, Option<B>>)
--> Result<Exchange<Vec<u8>, Vec<u8>>, Error>
+-> Result<Exchange<Vec<u8>>, Error>
 where P: Dump, B: Dump
 {
     #[inline]
     fn dump<V: Dump>(value: Option<V>) -> Result<Vec<u8>, Error> {
-        let mut dumper = Dumper::new();
+        let mut dumper = Dumper::new(Vec::with_capacity(128));
         V::dump_option(value.as_ref(), &mut dumper)?;
         Ok(dumper.finish())
     }
@@ -39,36 +37,39 @@ where P: Dump, B: Dump
 
 #[inline]
 const fn mask(loglen: u8) -> u32 {
+    let loglen = loglen as u32;
+    assert!(loglen <= u32::BITS);
+    if loglen == u32::BITS { return u32::MAX; }
     (1_u32 << loglen) - 1
 }
 
-pub(super) struct Dumper {
-    output: Writer,
+pub(super) struct Dumper<W: Write<u8>> {
+    writer: W,
 }
 
-impl Dumper {
+impl<W: Write<u8>> Dumper<W> {
 
-    pub(super) fn new() -> Self {
-        Self { output: Writer::new() }
+    pub(super) fn new(writer: W) -> Self {
+        Self { writer }
     }
 
-    pub(super) fn finish(self) -> Vec<u8> {
-        self.output.into_vec()
+    pub(super) fn finish(self) -> W {
+        self.writer
     }
 
     #[inline]
     fn write_byte(&mut self, value: u8) {
-        self.output.write_byte(value);
+        self.writer.write_byte(value);
     }
 
     #[inline]
     fn write_array<const N: usize>(&mut self, value: [u8; N]) {
-        self.output.write_array(value);
+        self.writer.write_array(value);
     }
 
     #[inline]
     fn write_slice(&mut self, value: &[u8]) {
-        self.output.write_slice(value)
+        self.writer.write_slice(value)
     }
 
     #[inline]
@@ -119,7 +120,6 @@ impl Dumper {
     fn dump_table_header<'v, T>(&mut self, table: &T) -> Result<(), Error>
     where T: TableDumpIter<'v>, T::Key: KeyDump
     {
-        self.output.reserve(4);
         match (table.array_len(), table.assoc_loglen()) {
             (len @ 0 ..= 0xF, None) => {
                 self.write_byte(0x90 | (len as u8));
@@ -164,7 +164,7 @@ impl Dumper {
 
 }
 
-impl KeyDumper for &mut Dumper {
+impl<W: Write<u8>> KeyDumper for &mut Dumper<W> {
     type Ok = <Self as DumperTr>::Ok;
     type Error = <Self as DumperTr>::Error;
 
@@ -179,7 +179,7 @@ impl KeyDumper for &mut Dumper {
     }
 }
 
-impl DumperTr for &mut Dumper {
+impl<W: Write<u8>> DumperTr for &mut Dumper<W> {
     type Ok = ();
     type Error = Error;
 
@@ -194,7 +194,6 @@ impl DumperTr for &mut Dumper {
     }
 
     fn dump_integer(self, value: i32) -> Result<Self::Ok, Error> {
-        self.output.reserve(5);
         match value {
             -0x20 ..= 0x7F => {
                 self.write_array::<1>((value as i8).to_le_bytes());
@@ -228,14 +227,12 @@ impl DumperTr for &mut Dumper {
     }
 
     fn dump_float(self, value: f64) -> Result<Self::Ok, Error> {
-        self.output.reserve(9);
         self.write_byte(0xCB);
         self.write_array::<8>(value.to_le_bytes());
         Ok(())
     }
 
     fn dump_string(self, value: &str) -> Result<Self::Ok, Error> {
-        self.output.reserve(3);
         match value.len() {
             0 ..= 0x1F => {
                 self.write_byte(0xA0 | (value.len() as u8));
@@ -295,19 +292,19 @@ const SERIAL_LEN: usize = {
     len
 };
 
-struct SerialWriter<'v, K, V>
-where K: KeyDump, V: Dump
+struct SerialWriter<'v, W, K, V>
+where W: Write<u8>, K: KeyDump, V: Dump
 {
-    dumper: &'v mut Dumper,
+    dumper: &'v mut Dumper<W>,
     values: [Option<TableItem<K, &'v V>>; SERIAL_LEN],
     len: u8,
     mask: u8,
 }
 
-impl<'v, K, V> SerialWriter<'v, K, V>
-where K: KeyDump, V: Dump
+impl<'v, W, K, V> SerialWriter<'v, W, K, V>
+where W: Write<u8>, K: KeyDump, V: Dump
 {
-    fn new(dumper: &'v mut Dumper) -> Self {
+    fn new(dumper: &'v mut Dumper<W>) -> Self {
         Self {
             dumper,
             values: [(); SERIAL_LEN].map(|()| None),
