@@ -8,7 +8,6 @@ use serde::{
 use crate::{
     common::TransparentRef,
     string::Str,
-    serde::FlatOption,
     table_iter::TableSize as _,
 };
 
@@ -17,39 +16,173 @@ use super::{
     TableMapBuilder,
 };
 
-pub fn serialize<T, S>(value: &Option<InnerValue>, ser: S)
--> Result<S::Ok, S::Error>
-where S: Serializer
-{
-    FlatOption(value.as_ref().map(Value::from_ref)).serialize(ser)
+// pub fn serialize<S>(value: &Option<InnerValue>, ser: S)
+// -> Result<S::Ok, S::Error>
+// where S: Serializer
+// {
+//     FlatOption(value.as_ref().map(Value::from_ref)).serialize(ser)
+// }
+
+// pub fn deserialize<'de, D>(de: D)
+// -> Result<Option<InnerValue>, D::Error>
+// where D: Deserializer<'de>
+// {
+//     Ok(FlatOption::deserialize(de)?.into_inner().map(Value::into_inner))
+// }
+
+type InnerValueOption = Option<InnerValue>;
+
+#[derive(Clone)]
+#[repr(transparent)]
+pub struct ValueOption(
+    pub InnerValueOption,
+);
+
+impl AsRef<InnerValueOption> for ValueOption {
+    fn as_ref(&self) -> &InnerValueOption { &self.0 }
 }
 
-pub fn deserialize<'de, D>(de: D)
--> Result<Option<InnerValue>, D::Error>
-where D: Deserializer<'de>
-{
-    Ok(FlatOption::deserialize(de)?.into_inner().map(Value::into_inner))
+// SAFETY: `Self` is `repr(transparent)` over `Target`
+unsafe impl TransparentRef for ValueOption {
+    type Target = InnerValueOption;
 }
 
-#[derive(Deserialize, Serialize)]
-#[serde(remote = "InnerValue")]
-#[serde(untagged)]
-enum ValueDef {
-    Boolean(bool),
-    Integer(i32),
-    Float(f64),
-    String(Str),
-    #[serde(
-        serialize_with="table_serialize",
-        deserialize_with="table_deserialize" )]
-    Table(Table),
+impl ValueOption {
+
+    #[inline]
+    fn into_inner(self) -> InnerValueOption { self.0 }
+
+    #[inline]
+    fn serialize_inner<S>(this: &InnerValueOption, ser: S)
+    -> Result<S::Ok, S::Error>
+    where S: Serializer
+    { Self::from_ref(this).serialize(ser) }
+
+    #[inline]
+    fn deserialize_inner<'de, D>(de: D)
+    -> Result<InnerValueOption, D::Error>
+    where D: Deserializer<'de>
+    { Ok(Self::deserialize(de)?.into_inner()) }
+
 }
 
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(transparent)]
+impl<'de> Deserialize<'de> for ValueOption {
+    fn deserialize<D>(de: D) -> Result<Self, D::Error>
+    where D: Deserializer<'de>
+    {
+        Ok(Self(de.deserialize_any(ValueOptionVisitor)?))
+    }
+}
+
+struct ValueOptionVisitor;
+
+impl<'de> Visitor<'de> for ValueOptionVisitor {
+    type Value = Option<InnerValue>;
+
+    fn expecting(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(fmt, "value")
+    }
+
+    fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
+    where E: serde::de::Error
+    { Ok(Some(InnerValue::Boolean(v))) }
+
+    fn visit_i8<E>(self, v: i8) -> Result<Self::Value, E>
+    where E: serde::de::Error
+    { Ok(Some(InnerValue::Integer(v.into()))) }
+
+    fn visit_i16<E>(self, v: i16) -> Result<Self::Value, E>
+    where E: serde::de::Error
+    { Ok(Some(InnerValue::Integer(v.into()))) }
+
+    fn visit_i32<E>(self, v: i32) -> Result<Self::Value, E>
+    where E: serde::de::Error
+    { Ok(Some(InnerValue::Integer(v))) }
+
+    fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+    where E: serde::de::Error
+    { Ok(Some(InnerValue::Integer(v.try_into().map_err(E::custom)?))) }
+
+    fn visit_u8<E>(self, v: u8) -> Result<Self::Value, E>
+    where E: serde::de::Error
+    { Ok(Some(InnerValue::Integer(v.into()))) }
+
+    fn visit_u16<E>(self, v: u16) -> Result<Self::Value, E>
+    where E: serde::de::Error
+    { Ok(Some(InnerValue::Integer(v.into()))) }
+
+    fn visit_u32<E>(self, v: u32) -> Result<Self::Value, E>
+    where E: serde::de::Error
+    { Ok(Some(InnerValue::Integer(v.try_into().map_err(E::custom)?))) }
+
+    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+    where E: serde::de::Error
+    { Ok(Some(InnerValue::Integer(v.try_into().map_err(E::custom)?))) }
+
+    fn visit_f32<E>(self, v: f32) -> Result<Self::Value, E>
+    where E: serde::de::Error
+    { Ok(Some(InnerValue::Float(v.into()))) }
+
+    fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+    where E: serde::de::Error
+    { Ok(Some(InnerValue::Float(v))) }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where E: serde::de::Error
+    { Ok(Some(InnerValue::String(Str::from(v)))) }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E>
+    where E: serde::de::Error
+    { Ok(None) }
+
+    fn visit_some<D>(self, de: D) -> Result<Self::Value, D::Error>
+    where D: Deserializer<'de>
+    { Ok(ValueOption::deserialize(de)?.into_inner()) }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E>
+    where E: serde::de::Error
+    { Ok(Some(InnerValue::Table(TableVisitor.visit_unit()?))) }
+
+    fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
+    where A: serde::de::SeqAccess<'de>
+    { Ok(Some(InnerValue::Table(TableVisitor.visit_seq(seq)?))) }
+
+    fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+    where A: serde::de::MapAccess<'de>
+    { Ok(Some(InnerValue::Table(TableVisitor.visit_map(map)?))) }
+
+}
+
+impl Serialize for ValueOption {
+    #[inline]
+    fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
+    where S: Serializer
+    {
+        match self.0 {
+            None => ser.serialize_none(),
+            Some(ref value) => Value::from_ref(value).serialize(ser),
+        }
+    }
+}
+
+
+// #[derive(Deserialize, Serialize)]
+// #[serde(remote = "InnerValue")]
+// #[serde(untagged)]
+// enum ValueDef {
+//     Boolean(bool),
+//     Integer(i32),
+//     Float(f64),
+//     String(Str),
+//     #[serde(
+//         serialize_with="table_serialize",
+//         deserialize_with="table_deserialize" )]
+//     Table(Table),
+// }
+
+#[derive(Clone)]
 #[repr(transparent)]
 pub struct Value(
-    #[serde(with = "ValueDef")]
     pub InnerValue,
 );
 
@@ -78,22 +211,40 @@ impl Value {
     }
 }
 
-impl<'v> FlatOption<&'v Value> {
-    #[inline]
-    #[must_use]
-    fn from_option_ref(option_ref: Option<&'v InnerValue>) -> Self {
-        FlatOption(option_ref.map(Value::from_ref))
+impl<'de> Deserialize<'de> for Value {
+    fn deserialize<D>(de: D) -> Result<Self, D::Error>
+    where D: Deserializer<'de>
+    {
+        use serde::de::Error as _;
+        let Some(value) = de.deserialize_any(ValueOptionVisitor)? else {
+            return Err(D::Error::custom("The value cannot be None"));
+        };
+        Ok(Self(value))
     }
 }
+
+impl Serialize for Value {
+    fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
+    where S: Serializer
+    {
+        match &self.0 {
+            InnerValue::Boolean (value) => value.serialize(ser),
+            InnerValue::Integer (value) => value.serialize(ser),
+            InnerValue::Float   (value) => value.serialize(ser),
+            InnerValue::String  (value) => value.serialize(ser),
+            InnerValue::Table   (table) => table_serialize(table, ser),
+        }
+    }
+}
+
 
 fn table_serialize<S>(value: &Table, ser: S)
 -> Result<S::Ok, S::Error>
 where S: Serializer
 {
-    if value.assoc_loglen().is_none() {
+    if value.assoc_loglen().is_none() && value.array_len() > 0 {
         ser.collect_seq( value.array_iter()
-            .map(Option::as_ref)
-            .map(FlatOption::from_option_ref) )
+            .map(ValueOption::from_ref) )
     } else {
         ser.collect_map( value.sorted_iter()
             .map(|(k, v)| (k, Value::from_ref(v))) )
@@ -116,13 +267,18 @@ impl<'de> Visitor<'de> for TableVisitor {
         write!(fmt, "a map or an array")
     }
 
+    fn visit_unit<E>(self) -> Result<Self::Value, E>
+    where E: serde::de::Error
+    {
+        Ok(TableMapBuilder::new().finish())
+    }
+
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
     where A: serde::de::SeqAccess<'de>
     {
         let mut builder = TableMapBuilder::new();
         let mut index = 1;
-        while let Some(FlatOption(value)) = seq.next_element()? {
-            let value = value.map(Value::into_inner);
+        while let Some(ValueOption(value)) = seq.next_element()? {
             builder.insert(Key::Index(index), value);
             index += 1;
         }
@@ -133,8 +289,7 @@ impl<'de> Visitor<'de> for TableVisitor {
     where A: serde::de::MapAccess<'de>
     {
         let mut builder = TableMapBuilder::new();
-        while let Some((key, FlatOption(value))) = map.next_entry()? {
-            let value = value.map(Value::into_inner);
+        while let Some((key, ValueOption(value))) = map.next_entry()? {
             builder.insert::<Key>(key, value);
         }
         Ok(builder.finish())
@@ -142,3 +297,66 @@ impl<'de> Visitor<'de> for TableVisitor {
 
 }
 
+#[cfg(test)]
+mod test {
+
+use crate::string::Str;
+
+use super::{
+    ValueOption as VO, InnerValue as Value,
+};
+
+#[test]
+fn test_simple_value_option_ron() {
+    for (v, s) in [
+        (VO(None),                                  "None"),
+        (VO(Some(Value::Boolean(true))),            "true"),
+        (VO(Some(Value::Boolean(false))),           "false"),
+        (VO(Some(Value::Integer(42))),              "42"),
+        (VO(Some(Value::Integer(-42))),             "-42"),
+        (VO(Some(Value::Float(42.0))),              "42.0"),
+        (VO(Some(Value::String(Str::known("42")))), "\"42\""),
+    ] {
+        let as_str = String::as_str;
+        let ron_result = ron::to_string(&v);
+        assert_eq!(ron_result.as_ref().map(as_str), Ok(s));
+        let ron_result2 = ron::to_string(
+            &ron::from_str::<VO>(s).unwrap() );
+        assert_eq!(ron_result2.as_ref().map(as_str), Ok(s));
+    }
+}
+
+#[test]
+fn test_value_ron() {
+    for (s0, s2) in [
+        ("None"                        , "None"                        ),
+        ("false"                       , "false"                       ),
+        ("true"                        , "true"                        ),
+        ("42"                          , "42"                          ),
+        ("42.0"                        , "42.0"                        ),
+        ("\"42\""                      , "\"42\""                      ),
+        ("()"                          , "{}"                          ),
+        ("[]"                          , "{}"                          ),
+        ("{}"                          , "{}"                          ),
+        ("( )"                         , "{}"                          ),
+        ("{ }"                         , "{}"                          ),
+        ("[ ]"                         , "{}"                          ),
+        ("[42]"                        , "[42]"                        ),
+        ("[{}]"                        , "[{}]"                        ),
+        ("[\"42\",{}]"                 , "[\"42\",{}]"                 ),
+        ("[\"\\\"42\\\"\"]"            , r#"["\"42\""]"#               ),
+        ("{17:42}"                     , "{17:42}"                     ),
+        ("{0:7,17:42}"                 , "{0:7,17:42}"                 ),
+    ] {
+        let s1 = test_single_value(s0);
+        assert_eq!(s1.as_ref().map(String::as_str), Ok(s2));
+    }
+}
+
+fn test_single_value(data0: &str) -> ron::Result<String> {
+    let value: VO = ron::from_str(data0)?;
+    let data1 = ron::to_string(&value)?;
+    Ok(data1)
+}
+
+}

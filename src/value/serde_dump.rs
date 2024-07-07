@@ -8,7 +8,7 @@ use serde::{
 use crate::{
     common::{ilog2_exact, TransparentRef},
     string::Str,
-    serde::{Identifier, FlatOption, FlatEnumOption, VecSeed},
+    serde::{Identifier, FlatEnumOption, VecSeed},
     table_iter::{TableItem, TableSize},
 };
 
@@ -18,30 +18,6 @@ use super::{
     table::load::TableLoadBuilder,
     table::dump::TableDumpIter,
 };
-
-
-pub fn serialize<S>(value: &Option<InnerValue>, ser: S)
--> Result<S::Ok, S::Error>
-where S: Serializer
-{
-    ValueOption::from_ref(value).serialize(ser)
-}
-
-pub fn serialize_ref<S>(value: &Option<&InnerValue>, ser: S)
--> Result<S::Ok, S::Error>
-where S: Serializer
-{
-    FlatOption(value.map(Value::from_ref)).serialize(ser)
-}
-
-pub fn deserialize<'de, D>(de: D)
--> Result<Option<InnerValue>, D::Error>
-where D: Deserializer<'de>
-{
-    // Somehow `FlatOption` doesn't do the job here.
-    // Probably because one of the elements is a
-    Ok(ValueOption::deserialize(de)?.into_inner())
-}
 
 
 type InnerValueOption = Option<InnerValue>;
@@ -62,18 +38,53 @@ unsafe impl TransparentRef for ValueOption {
 }
 
 impl ValueOption {
+
+    #[inline]
     fn into_inner(self) -> InnerValueOption { self.0 }
+
+    #[inline]
+    fn as_option_ref(&self) -> ValueOptionRef {
+        ValueOptionRef(self.0.as_ref())
+    }
+
+    #[inline]
+    fn serialize_inner<S>(this: &InnerValueOption, ser: S)
+    -> Result<S::Ok, S::Error>
+    where S: Serializer
+    { Self::from_ref(this).serialize(ser) }
+
+    #[inline]
+    fn deserialize_inner<'de, D>(de: D)
+    -> Result<InnerValueOption, D::Error>
+    where D: Deserializer<'de>
+    { Ok(Self::deserialize(de)?.into_inner()) }
+
 }
 
-impl Serialize for ValueOption {
-    fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
+type InnerValueOptionRef<'v> = Option<&'v InnerValue>;
+
+#[derive(Clone)]
+#[repr(transparent)]
+pub struct ValueOptionRef<'v>(
+    pub InnerValueOptionRef<'v>,
+);
+
+impl<'v> AsRef<InnerValueOptionRef<'v>> for ValueOptionRef<'v> {
+    fn as_ref(&self) -> &InnerValueOptionRef<'v> { &self.0 }
+}
+
+// SAFETY: `Self` is `repr(transparent)` over `Target`
+unsafe impl<'v> TransparentRef for ValueOptionRef<'v> {
+    type Target = InnerValueOptionRef<'v>;
+}
+
+impl<'v> ValueOptionRef<'v> {
+    #[inline]
+    fn serialize_inner<S>(this: &'v InnerValueOptionRef, ser: S)
+    -> Result<S::Ok, S::Error>
     where S: Serializer
-    {
-        match self.0 {
-            None => crate::serde::option_none::serialize(ser),
-            Some(ref value) => ValueDef::serialize(value, ser),
-        }
-    }
+    { Self::from_ref(this).serialize(ser) }
+
 }
 
 impl<'de> Deserialize<'de> for ValueOption {
@@ -146,8 +157,7 @@ impl<'de> Visitor<'de> for ValueOptionVisitor {
     { Ok(None) }
 
     fn visit_some<D>(self, de: D) -> Result<Self::Value, D::Error>
-    where
-        D: Deserializer<'de>,
+    where D: Deserializer<'de>
     { Ok(ValueOption::deserialize(de)?.into_inner()) }
 
     fn visit_unit<E>(self) -> Result<Self::Value, E>
@@ -164,24 +174,31 @@ impl<'de> Visitor<'de> for ValueOptionVisitor {
 
 }
 
-
-#[derive(Serialize)]
-#[serde(remote = "InnerValue")]
-#[serde(untagged)]
-enum ValueDef {
-    Boolean(bool),
-    Integer(i32),
-    Float(f64),
-    String(Str),
-    #[serde(serialize_with="table_serialize")]
-    Table(Table),
+impl Serialize for ValueOption {
+    #[inline]
+    fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
+    where S: Serializer
+    {
+        self.as_option_ref().serialize(ser)
+    }
 }
 
-#[derive(Clone, Serialize)]
-#[serde(transparent)]
+impl<'v> Serialize for ValueOptionRef<'v> {
+    #[inline]
+    fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
+    where S: Serializer
+    {
+        match self.0 {
+            None => ser.serialize_none(),
+            Some(value) => Value::from_ref(value).serialize(ser),
+        }
+    }
+}
+
+
+#[derive(Clone)]
 #[repr(transparent)]
 pub struct Value(
-    #[serde(serialize_with = "ValueDef::serialize")]
     pub InnerValue,
 );
 
@@ -222,22 +239,16 @@ impl<'de> Deserialize<'de> for Value {
     }
 }
 
-
-type InnerValueOptionRef<'v> = Option<&'v InnerValue>;
-
-#[derive(Clone)]
-#[repr(transparent)]
-pub struct ValueOptionRef<'v>(
-    pub InnerValueOptionRef<'v>,
-);
-
-impl<'v> Serialize for ValueOptionRef<'v> {
+impl Serialize for Value {
     fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
     where S: Serializer
     {
-        match self.0 {
-            None => crate::serde::option_none::serialize(ser),
-            Some(value) => ValueDef::serialize(value, ser),
+        match &self.0 {
+            InnerValue::Boolean (value) => value.serialize(ser),
+            InnerValue::Integer (value) => value.serialize(ser),
+            InnerValue::Float   (value) => value.serialize(ser),
+            InnerValue::String  (value) => value.serialize(ser),
+            InnerValue::Table   (table) => table_serialize(table, ser),
         }
     }
 }
@@ -251,7 +262,7 @@ pub enum AssocItemRefDef<'v> {
     Dead { link: i32 },
     Live {
         key: Key,
-        #[serde(serialize_with="serialize_ref")]
+        #[serde(serialize_with="ValueOptionRef::serialize_inner")]
         value: Option<&'v InnerValue>,
         link: i32,
     },
@@ -273,7 +284,7 @@ pub enum AssocItemDef {
     Dead { link: i32 },
     Live {
         key: Key,
-        #[serde(deserialize_with="deserialize")]
+        #[serde(deserialize_with="ValueOption::deserialize_inner")]
         value: Option<InnerValue>,
         link: i32,
     },
@@ -477,7 +488,8 @@ fn test_value_ron() {
         ("(array:[],assoc:[])"         , "()"                          ),
         ("(array:[42])"                , "(array:[42])"                ),
         ("(array:[()])"                , "(array:[()])"                ),
-        ("(array:[\"42\",( )])"        , "(array:[\"42\",()])"                ),
+        ("(array:[\"42\",( )])"        , "(array:[\"42\",()])"         ),
+        ("(array:[\"\\\"42\\\"\"])"    , r#"(array:["\"42\""])"#       ),
         ("(assoc:[None])"              ,
          "(assoc:[None],assoc_last_free:1)" ),
         ("(assoc:[Dead(link:0)])"    ,
