@@ -53,25 +53,6 @@ pub const fn ilog2_exact(len: usize) -> Option<LogSize> {
 }
 
 
-#[inline]
-pub(crate) unsafe fn ptr_sub<T>(more: *const T, less: *const T) -> usize {
-    //! # Safety
-    //! The caller guarantees that
-    //! * `less <= more`;
-    //! * both pointers are contained within the same allocated object;
-    //! * distance is exact multiple of `T`;
-    //!
-    //! …and other safety requirements of `offset_from` method.
-    // SAFETY: ensured by the caller
-    let diff = unsafe { more.offset_from(less) };
-    if diff < 0 {
-        // SAFETY: ensured by the caller
-        unsafe { std::hint::unreachable_unchecked() }
-    }
-    diff as usize
-}
-
-
 /// # Safety
 /// The implementer must ensure that
 /// `Self` is `repr(transparent)` over `Self::Target` and
