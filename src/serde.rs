@@ -83,42 +83,6 @@ impl<'de> serde::de::Visitor<'de> for IdentifierVisitor {
 }
 
 
-pub(crate) mod option_none {
-    use serde::{
-        de::Visitor, Deserializer,
-        Serializer,
-    };
-
-    pub(crate) fn serialize<S>(ser: S)
-    -> Result<S::Ok, S::Error>
-    where S: Serializer
-    {
-        ser.serialize_none()
-    }
-
-    pub(crate) fn deserialize<'de, D>(de: D)
-    -> Result<(), D::Error>
-    where D: Deserializer<'de>
-    {
-        de.deserialize_option(NoneVisitor)
-    }
-
-    struct NoneVisitor;
-
-    impl<'de> Visitor<'de> for NoneVisitor {
-        type Value = ();
-        fn expecting(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-            write!(fmt, "a None")
-        }
-        fn visit_none<E>(self) -> Result<Self::Value, E>
-        where E: serde::de::Error
-        {
-            Ok(())
-        }
-    }
-
-}
-
 pub(crate) mod option_some {
     use serde::{
         Serialize, Serializer,
@@ -142,27 +106,6 @@ pub(crate) mod option_some {
         T::deserialize(de).map(Some)
     }
 
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(untagged, remote = "Option")]
-enum FlatOptionDef<T> {
-    #[serde(with="option_none")]
-    None,
-    Some(T),
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(transparent)]
-#[repr(transparent)]
-pub(crate) struct FlatOption<T>(
-    #[serde( with = "FlatOptionDef",
-        bound(deserialize="T: Deserialize<'de>", serialize="T: Serialize") )]
-    pub Option<T>,
-);
-
-impl<T> FlatOption<T> {
-    pub(crate) fn into_inner(self) -> Option<T> { self.0 }
 }
 
 #[repr(transparent)]
