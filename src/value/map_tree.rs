@@ -16,20 +16,6 @@ use super::{
     TableMapBuilder,
 };
 
-// pub fn serialize<S>(value: &Option<InnerValue>, ser: S)
-// -> Result<S::Ok, S::Error>
-// where S: Serializer
-// {
-//     FlatOption(value.as_ref().map(Value::from_ref)).serialize(ser)
-// }
-
-// pub fn deserialize<'de, D>(de: D)
-// -> Result<Option<InnerValue>, D::Error>
-// where D: Deserializer<'de>
-// {
-//     Ok(FlatOption::deserialize(de)?.into_inner().map(Value::into_inner))
-// }
-
 type InnerValueOption = Option<InnerValue>;
 
 #[derive(Clone)]
@@ -48,9 +34,6 @@ unsafe impl TransparentRef for ValueOption {
 }
 
 impl ValueOption {
-
-    #[inline]
-    fn into_inner(self) -> InnerValueOption { self.0 }
 
     #[inline]
     fn serialize_inner<S>(this: &InnerValueOption, ser: S)
@@ -166,20 +149,6 @@ impl Serialize for ValueOption {
 }
 
 
-// #[derive(Deserialize, Serialize)]
-// #[serde(remote = "InnerValue")]
-// #[serde(untagged)]
-// enum ValueDef {
-//     Boolean(bool),
-//     Integer(i32),
-//     Float(f64),
-//     String(Str),
-//     #[serde(
-//         serialize_with="table_serialize",
-//         deserialize_with="table_deserialize" )]
-//     Table(Table),
-// }
-
 #[derive(Clone)]
 #[repr(transparent)]
 pub struct Value(
@@ -205,9 +174,10 @@ unsafe impl TransparentRef for Value {
 }
 
 impl Value {
+    #[allow(clippy::same_name_method)]
     #[must_use]
     pub fn into_inner(self) -> InnerValue {
-        <Self as TransparentRef>::unwrap(self)
+        <Self as TransparentRef>::into_inner(self)
     }
 }
 

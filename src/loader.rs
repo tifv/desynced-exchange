@@ -47,13 +47,25 @@ pub struct Loader<R: Read<u8>> {
 }
 
 #[cold]
-fn error_unexpected() -> Error {
-    Error::from("unexpected byte")
+fn error_unexpected(byte: u8) -> Error {
+    Error::from(format!("unexpected byte {byte:X}"))
 }
 
 #[cold]
 fn error_eof() -> Error {
     Error::from("unexpected end of data")
+}
+
+#[cold]
+fn error_bad_size() -> Error {
+    Error::from(
+        "Table size is too large to be correct" )
+}
+
+#[cold]
+fn error_unsupported_size() -> Error {
+    Error::from(
+        "Table size is unsupported" )
 }
 
 struct TableHeader {
@@ -110,7 +122,7 @@ impl<R: Read<u8>> Loader<R> {
             let mut byte = self.read_byte()?;
             let continued = (byte & 0x01) > 0;
             byte >>= 1; next_shift -= 1;
-            if next_shift > 14 {
+            if next_shift > 21 {
                 return Err(Error::from("unexpectedly large index"));
             }
             value += u32::from(byte) << shift;
@@ -135,7 +147,7 @@ impl<R: Read<u8>> Loader<R> {
                 negative = Some(byte & 0x01 > 0);
                 byte >>= 1; next_shift -= 1;
             }
-            if next_shift > 14 {
+            if next_shift > 20 {
                 return Err(Error::from("unexpectedly large index"));
             }
             value += u32::from(byte) << shift;
@@ -153,7 +165,7 @@ impl<R: Read<u8>> Loader<R> {
         #![allow(clippy::unused_self)]
         match head {
             0xC0 => Ok(()),
-            _ => Err(error_unexpected()),
+            _ => Err(error_unexpected(head)),
         }
     }
 
@@ -162,7 +174,7 @@ impl<R: Read<u8>> Loader<R> {
         match head {
             0xC2 => Ok(false),
             0xC3 => Ok(true),
-            _ => Err(error_unexpected()),
+            _ => Err(error_unexpected(head)),
         }
     }
 
@@ -183,14 +195,14 @@ impl<R: Read<u8>> Loader<R> {
                 Ok(i16::from_le_bytes(self.read_array::<2>()?) as i32),
             0xD2 =>
                 Ok(i32::from_le_bytes(self.read_array::<4>()?)),
-            _ => Err(error_unexpected()),
+            _ => Err(error_unexpected(head)),
         }
     }
 
     fn load_float(&mut self, head: u8) -> Result<f64, Error> {
         match head {
             0xCB => Ok(f64::from_le_bytes(self.read_array::<8>()?)),
-            _ => Err(error_unexpected()),
+            _ => Err(error_unexpected(head)),
         }
     }
 
@@ -202,7 +214,7 @@ impl<R: Read<u8>> Loader<R> {
             head @ 0xA0 ..= 0xBF => (head & 0x1F) as u32,
             0xD9 => u8::from_le_bytes(self.read_array::<1>()?) as u32,
             0xDA => u16::from_le_bytes(self.read_array::<2>()?) as u32,
-            _ => return Err(error_unexpected()),
+            _ => return Err(error_unexpected(head)),
         };
         let len = u32_to_usize(len);
         Ok(std::str::from_utf8(self.read_slice(len)?)?)
@@ -232,17 +244,16 @@ impl<R: Read<u8>> Loader<R> {
                 }
             },
             0xDE => {
-                let next = self.read_byte()?;
-                let has_array_part = next & 0x01 > 0;
-                let assoc_loglen = Some(next >> 1);
-                let 0x00 = self.read_byte()? else {
-                    return Err(error_unexpected());
+                let (has_array_part, assoc_loglen) = {
+                    let byte = self.read_byte()?;
+                    (byte & 0x01 > 0, Some(byte >> 1))
+                };
+                if let byte @ 0x01.. = self.read_byte()? {
+                    return Err(error_unexpected(byte));
                 };
                 let array_len = if has_array_part {
                     self.read_ext_uint()?
-                } else {
-                    return Err(error_unexpected());
-                };
+                } else { 0_u32 };
                 let assoc_last_free = self.read_ext_uint()?;
                 TableHeader {
                     array_len,
@@ -250,7 +261,7 @@ impl<R: Read<u8>> Loader<R> {
                     assoc_last_free,
                 }
             },
-            _ => return Err(error_unexpected()),
+            _ => return Err(error_unexpected(head)),
         })
     }
 
@@ -271,8 +282,7 @@ impl<R: Read<u8>> LoaderTr for &mut Loader<R> {
             },
             0xC2 | 0xC3 => builder.build_boolean(
                 self.load_boolean(head)? ),
-            0xC5 => // dead key
-                Err(Error::from("unexpected dead key marker")),
+            0xC5 => Err(Error::from("unexpected dead key marker")),
             0x00 ..= 0x7F | 0xE0 ..= 0xFF |
             0xCC | 0xCD | 0xCE |
             0xD0 | 0xD1 | 0xD2 => builder.build_integer(
@@ -282,26 +292,23 @@ impl<R: Read<u8>> LoaderTr for &mut Loader<R> {
             0xA0 ..= 0xBF | 0xD9 | 0xDA => {
                 builder.build_string(self.load_string(head)?)
             },
-            0x80 ..= 0x8F | 0x90 ..= 0x9F | 0xDC => {
+            0x80 ..= 0x8F | 0x90 ..= 0x9F | 0xDC | 0xDE => {
                 let TableHeader { array_len, assoc_loglen, assoc_last_free } =
                     self.load_table_header(head)?;
                 self.max_array_len = match
                     self.max_array_len.checked_sub(array_len)
                 {
-                    None => return Err(Error::from(
-                        "Encoded table size is too large to be correct" )),
+                    None => return Err(error_bad_size()),
                     Some(rest) => rest,
                 };
                 if let Some(assoc_loglen) = assoc_loglen {
                     if assoc_loglen > crate::MAX_ASSOC_LOGLEN {
-                        return Err(Error::from(
-                            "Encoded table size is too large" ));
+                        return Err(error_unsupported_size());
                     }
                     self.max_array_len = match
                         self.max_array_len.checked_sub(iexp2(Some(assoc_loglen)))
                     {
-                        None => return Err(Error::from(
-                            "Encoded table size is too large to be correct" )),
+                        None => return Err(error_bad_size()),
                         Some(rest) => rest,
                     };
                 }
@@ -311,7 +318,7 @@ impl<R: Read<u8>> LoaderTr for &mut Loader<R> {
                     assoc_loglen, assoc_last_free,
                 ))
             },
-            _ => Err(error_unexpected()),
+            _ => Err(error_unexpected(head)),
         }
     }
 
@@ -330,7 +337,7 @@ impl<R: Read<u8>> LoaderTr for &mut Loader<R> {
             0xA0 ..= 0xBF | 0xD9 | 0xDA => Ok(Some(
                 builder.build_string::<Error>(self.load_string(head)?)?
             )),
-            _ => Err(error_unexpected()),
+            _ => Err(error_unexpected(head)),
         }
     }
 

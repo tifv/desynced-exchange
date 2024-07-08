@@ -1,16 +1,17 @@
 use std::marker::PhantomData;
 
 use serde::{
-    Deserialize, de::{DeserializeSeed, Visitor},
-    Deserializer, de::EnumAccess,
-    de::value::StrDeserializer,
+    Deserialize, de, Deserializer,
     forward_to_deserialize_any,
     Serialize, Serializer
 };
 
-use crate::string::{Str, SharedStr};
+use crate::{
+    common::TransparentRef,
+    string::{Str, SharedStr},
+};
 
-pub enum Identifier<'de>{
+pub(crate) enum Identifier<'de>{
     Shared(SharedStr),
     Borrowed(&'de str),
 }
@@ -83,6 +84,182 @@ impl<'de> serde::de::Visitor<'de> for IdentifierVisitor {
 }
 
 
+macro_rules! delegate_to_i32 {
+    () => {
+
+    fn visit_i8<E>(self, v: i8) -> Result<Self::Value, E>
+    where E: de::Error
+    { self.visit_i32(i32::from(v)) }
+
+    fn visit_i16<E>(self, v: i16) -> Result<Self::Value, E>
+    where E: de::Error
+    { self.visit_i32(i32::from(v)) }
+
+    fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+    where E: de::Error
+    { self.visit_i32(i32::try_from(v).map_err(E::custom)?) }
+
+    fn visit_u8<E>(self, v: u8) -> Result<Self::Value, E>
+    where E: de::Error
+    { self.visit_i32(i32::from(v)) }
+
+    fn visit_u16<E>(self, v: u16) -> Result<Self::Value, E>
+    where E: de::Error
+    { self.visit_i32(i32::from(v)) }
+
+    fn visit_u32<E>(self, v: u32) -> Result<Self::Value, E>
+    where E: de::Error
+    { self.visit_i32(i32::try_from(v).map_err(E::custom)?) }
+
+    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+    where E: de::Error
+    { self.visit_i32(i32::try_from(v).map_err(E::custom)?) }
+
+    };
+}
+
+pub(crate) use delegate_to_i32 as delegate_to_i32;
+
+macro_rules! delegate_to_f64 {
+    () => {
+
+    fn visit_f32<E>(self, v: f32) -> Result<Self::Value, E>
+    where E: de::Error
+    { self.visit_f64(f64::try_from(v).map_err(E::custom)?) }
+
+    };
+}
+
+pub(crate) use delegate_to_f64 as delegate_to_f64;
+
+
+pub trait DeserializeOption<'de> : Deserialize<'de> {
+    fn deserialize_option<D>(de: D)
+    -> Result<Option<Self>, D::Error>
+    where D: Deserializer<'de>
+    {
+        Option::<Self>::deserialize(de)
+    }
+}
+
+macro_rules! forward_de_to_de_option {
+    ($type:ty) => {
+
+    impl<'de> ::serde::Deserialize<'de> for $type
+    where $type: $crate::serde::DeserializeOption<'de>
+    {
+        fn deserialize<D>(de: D)
+        -> ::std::result::Result<Self, D::Error>
+        where D: ::serde::Deserializer<'de>
+        {
+            use ::std::result::Result::{Ok, Err};
+            use ::std::option::Option::{None, Some};
+            use ::serde::de::Error as _;
+            let value_option = <Self as $crate::serde::DeserializeOption>
+                ::deserialize_option(de)?;
+            Ok(match value_option {
+                Some(value) => value,
+                None => return Err(D::Error::custom(
+                    "expected some value, not None" ))
+            })
+        }
+    }
+
+    };
+}
+
+pub(crate) use forward_de_to_de_option as forward_de_to_de_option;
+
+pub trait SerializeOption : Serialize {
+    fn serialize_option<S>(this: Option<&Self>, ser: S)
+    -> Result<S::Ok, S::Error>
+    where S: Serializer
+    {
+        this.serialize(ser)
+    }
+}
+
+macro_rules! impl_flat_se_option {
+    ($type:ty) => {
+
+    impl $crate::serde::SerializeOption for $type {
+        fn serialize_option<S>(this: ::std::option::Option<&Self>, ser: S)
+        -> ::std::result::Result<S::Ok, S::Error>
+        where S: ::serde::Serializer
+        {
+            use ::std::option::Option::{None, Some};
+            match this {
+                None => ser.serialize_none(),
+                Some(value) =>
+                    <Self as ::serde::Serialize>::serialize(value, ser),
+            }
+        }
+    }
+
+    };
+}
+
+pub(crate) use impl_flat_se_option as impl_flat_se_option;
+
+#[repr(transparent)]
+pub struct OptionSerdeWrap<V>(
+    pub Option<V>
+);
+
+impl<V> AsRef<Option<V>> for OptionSerdeWrap<V> {
+    fn as_ref(&self) -> &Option<V> { &self.0 }
+}
+
+// SAFETY: `Self` is `repr(transparent)` over `Target`
+unsafe impl<V> TransparentRef for OptionSerdeWrap<V> {
+    type Target = Option<V>;
+}
+
+impl<'de, V> Deserialize<'de> for OptionSerdeWrap<V>
+where V: DeserializeOption<'de>
+{
+    fn deserialize<D>(de: D) -> Result<Self, D::Error>
+    where D: Deserializer<'de>
+    {
+        Ok(Self(V::deserialize_option(de)?))
+    }
+}
+
+impl<V> Serialize for OptionSerdeWrap<V>
+where V: SerializeOption
+{
+    fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
+    where S: Serializer
+    {
+        V::serialize_option(self.0.as_ref(), ser)
+    }
+}
+
+#[repr(transparent)]
+pub struct OptionRefSerdeWrap<'v, V>(
+    pub Option<&'v V>
+);
+
+impl<'v, V> AsRef<Option<&'v V>> for OptionRefSerdeWrap<'v, V> {
+    fn as_ref(&self) -> &Option<&'v V> { &self.0 }
+}
+
+// SAFETY: `Self` is `repr(transparent)` over `Target`
+unsafe impl<'v, V> TransparentRef for OptionRefSerdeWrap<'v, V> {
+    type Target = Option<&'v V>;
+}
+
+impl<'v, V> Serialize for OptionRefSerdeWrap<'v, V>
+where V: SerializeOption
+{
+    fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
+    where S: Serializer
+    {
+        V::serialize_option(self.0, ser)
+    }
+}
+
+
 pub(crate) mod option_some {
     use serde::{
         Serialize, Serializer,
@@ -140,7 +317,7 @@ impl<T> Default for FlatEnumOptionVisitor<T> {
     fn default() -> Self { Self::new() }
 }
 
-impl<'de, T> Visitor<'de> for FlatEnumOptionVisitor<T>
+impl<'de, T> de::Visitor<'de> for FlatEnumOptionVisitor<T>
 where T: Deserialize<'de>
 {
     type Value = Option<T>;
@@ -188,13 +365,13 @@ where VA: serde::de::VariantAccess<'de>
         _variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Self::Error>
-    where V: Visitor<'de>
+    where V: de::Visitor<'de>
     {
         visitor.visit_enum(self)
     }
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where V: Visitor<'de> {
+    where V: de::Visitor<'de> {
         visitor.visit_enum(self)
     }
 
@@ -213,7 +390,7 @@ where VA: serde::de::VariantAccess<'de>
     }
 }
 
-impl<'de, VA> EnumAccess<'de> for FlatEnumOptionSome<'de, VA>
+impl<'de, VA> de::EnumAccess<'de> for FlatEnumOptionSome<'de, VA>
 where VA: serde::de::VariantAccess<'de>
 {
     type Error = VA::Error;
@@ -221,10 +398,11 @@ where VA: serde::de::VariantAccess<'de>
 
     fn variant_seed<V>(self, seed: V)
     -> Result<(V::Value, Self::Variant), Self::Error>
-    where V: DeserializeSeed<'de>
+    where V: de::DeserializeSeed<'de>
     {
         Ok((
-            V::deserialize(seed, StrDeserializer::new(self.variant.as_ref()))?,
+            V::deserialize( seed,
+                de::value::StrDeserializer::new(self.variant.as_ref()) )?,
             self.value,
         ))
     }
@@ -336,7 +514,7 @@ pub trait FieldNames {
 }
 
 macro_rules! define_field_names {
-    ($type_vis: vis $type_name:ident, [$($field:literal),*$(,)?]) => {
+    ($type_vis:vis $type_name:ident, [$($field:literal),*$(,)?]) => {
         $type_vis struct $type_name;
         impl $type_name {
             const FIELD_NAMES: &'static [&'static str] = &[$($field),*];
@@ -455,7 +633,7 @@ pub(crate) struct ExtraFieldsDeserializeSeed<'s, F: FieldNames, T> {
     inner: &'s mut ExtraFields<F, T>,
 }
 
-impl<'de, 's, F: FieldNames, T> DeserializeSeed<'de>
+impl<'de, 's, F: FieldNames, T> de::DeserializeSeed<'de>
     for ExtraFieldsDeserializeSeed<'s, F, T>
 where T: Deserialize<'de>
 {
@@ -468,7 +646,7 @@ where T: Deserialize<'de>
     }
 }
 
-impl<'de, 's, F: FieldNames, T> Visitor<'de>
+impl<'de, 's, F: FieldNames, T> de::Visitor<'de>
     for ExtraFieldsDeserializeSeed<'s, F, T>
 where T: Deserialize<'de>
 {
@@ -601,7 +779,7 @@ pub(crate) struct VecSeed<T> (
     pub Vec<T>
 );
 
-impl<'de, T> DeserializeSeed<'de> for VecSeed<T>
+impl<'de, T> de::DeserializeSeed<'de> for VecSeed<T>
 where T: Deserialize<'de>
 {
     type Value = Vec<T>;
@@ -613,7 +791,7 @@ where T: Deserialize<'de>
     }
 }
 
-impl<'de, T> Visitor<'de> for VecSeed<T>
+impl<'de, T> de::Visitor<'de> for VecSeed<T>
 where T: Deserialize<'de>
 {
     type Value = Vec<T>;

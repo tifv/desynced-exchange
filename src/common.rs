@@ -60,11 +60,13 @@ pub const fn ilog2_exact(len: usize) -> Option<LogSize> {
 /// the contained value.
 pub(crate) unsafe trait TransparentRef : AsRef<Self::Target> + Sized {
     type Target : Sized;
+    #[must_use]
     fn from_ref(target: &Self::Target) -> &Self {
         // SAFETY: `Self` is `repr(transparent)` over `Target`
         unsafe { &*((target as *const Self::Target).cast::<Self>()) }
     }
-    fn unwrap(self) -> Self::Target {
+    #[must_use]
+    fn into_inner(self) -> Self::Target {
         let this = std::ptr::addr_of!(self);
         std::mem::forget(self);
         // SAFETY: `Self` is `repr(transparent)` over `Target`

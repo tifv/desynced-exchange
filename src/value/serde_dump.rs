@@ -40,9 +40,6 @@ unsafe impl TransparentRef for ValueOption {
 impl ValueOption {
 
     #[inline]
-    fn into_inner(self) -> InnerValueOption { self.0 }
-
-    #[inline]
     fn as_option_ref(&self) -> ValueOptionRef {
         ValueOptionRef(self.0.as_ref())
     }
@@ -221,9 +218,10 @@ unsafe impl TransparentRef for Value {
 }
 
 impl Value {
+    #[allow(clippy::same_name_method)]
     #[must_use]
     pub fn into_inner(self) -> InnerValue {
-        <Self as TransparentRef>::unwrap(self)
+        <Self as TransparentRef>::into_inner(self)
     }
 }
 
@@ -307,13 +305,6 @@ impl AsRef<InnerAssocItem> for AssocItem {
 // SAFETY: `Self` is `repr(transparent)` over `Target`
 unsafe impl TransparentRef for AssocItem {
     type Target = InnerAssocItem;
-}
-
-impl AssocItem {
-    #[must_use]
-    pub fn into_inner(self) -> InnerAssocItem {
-        <Self as TransparentRef>::unwrap(self)
-    }
 }
 
 fn table_serialize<S>(table: &Table, ser: S)

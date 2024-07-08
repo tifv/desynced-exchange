@@ -47,14 +47,16 @@ pub struct Blueprint {
 
 impl TryFrom<Value> for Blueprint {
     type Error = LoadError;
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        todo!()
+    fn try_from(_value: Value) -> Result<Self, Self::Error> {
+        Err(LoadError::from(
+            "Structural representation of blueprints is not yet supported" ))
     }
 }
 
 impl From<Blueprint> for Value {
-    fn from(value: Blueprint) -> Self {
-        todo!()
+    fn from(_value: Blueprint) -> Self {
+        todo!(
+            "Structural representation of blueprints is not yet supported" )
     }
 }
 
