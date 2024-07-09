@@ -177,7 +177,7 @@ impl ser::Serializer for Serializer {
 
 }
 
-pub struct ValueSerializer(());
+struct ValueSerializer(());
 
 impl ValueSerializer {
     fn new() -> Self {
@@ -356,11 +356,11 @@ impl ser::Serializer for ValueSerializer {
 
 }
 
-pub trait ValueFinisher {
+trait ValueFinisher {
     fn finish(self, value: Value) -> Value;
 }
 
-pub struct TrivialFinisher;
+struct TrivialFinisher;
 
 impl ValueFinisher for TrivialFinisher {
     fn finish(self, value: Value) -> Value {
@@ -368,7 +368,7 @@ impl ValueFinisher for TrivialFinisher {
     }
 }
 
-pub struct VariantFinisher(&'static str);
+struct VariantFinisher(&'static str);
 
 impl ValueFinisher for VariantFinisher {
     fn finish(self, value: Value) -> Value {
@@ -380,7 +380,7 @@ impl ValueFinisher for VariantFinisher {
     }
 }
 
-pub struct TableArraySerializer<F: ValueFinisher> {
+struct TableArraySerializer<F: ValueFinisher> {
     f: F,
     array: ArrayBuilder<Value>,
 }
@@ -407,7 +407,7 @@ impl<F: ValueFinisher> TableArraySerializer<F> {
     }
 }
 
-pub struct TableSerializer<F: ValueFinisher> {
+struct TableSerializer<F: ValueFinisher> {
     f: F,
     table: TableBuilder<Value>,
     next_key: Option<Key>,
@@ -512,7 +512,7 @@ impl<F: ValueFinisher> ser::SerializeMap for TableSerializer<F> {
         let old_key = self.next_key.replace(
             key.serialize(ValueSerializer::new())?.try_into()? );
         assert!( old_key.is_none(),
-            "consequent `serialize_key` detected" );
+            "consequent `serialize_key` calls" );
         Ok(())
     }
 
@@ -520,7 +520,7 @@ impl<F: ValueFinisher> ser::SerializeMap for TableSerializer<F> {
     where T: ?Sized + ser::Serialize
     {
         let Some(key) = self.next_key.take() else {
-            panic!("missing `serialize_key` detected");
+            panic!("missing `serialize_key` call");
         };
         self.serialize_value_with_key(key, value)
     }

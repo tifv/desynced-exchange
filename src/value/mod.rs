@@ -95,6 +95,11 @@ impl From<Str> for Key {
     }
 }
 
+fn err_key_from_value() -> crate::error::DumpError {
+    crate::error::DumpError::from(
+        "only integers ans strings can serve as keys")
+}
+
 impl TryFrom<Value> for Key {
     type Error = crate::error::DumpError;
     fn try_from(value: Value) -> Result<Self, Self::Error> {
@@ -102,8 +107,7 @@ impl TryFrom<Value> for Key {
             Value::Integer(index) => Self::Index(index),
             Value::String(string) => Self::Name(string),
             Value::Boolean(_) | Value::Float(_) | Value::Table(_)
-                => return Err(Self::Error::from(
-                    "the value cannot serve as a key")),
+                => return Err(err_key_from_value()),
         })
     }
 }
@@ -111,8 +115,7 @@ impl TryFrom<Value> for Key {
 impl TryFrom<Option<Value>> for Key {
     type Error = crate::error::DumpError;
     fn try_from(value: Option<Value>) -> Result<Self, Self::Error> {
-        Self::try_from(value.ok_or_else(|| Self::Error::from(
-            "nil value cannot serve as a key"))?)
+        Self::try_from(value.ok_or_else(err_key_from_value)?)
     }
 }
 
