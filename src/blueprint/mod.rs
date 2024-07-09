@@ -2,14 +2,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     error::{LoadError, DumpError},
-    value::Value,
-    operand::Value as OperandValue,
+    value::Value as _Value,
 };
 
-pub use crate::{
-    Exchange,
-    behavior::Behavior,
-};
+pub use crate::Exchange;
+
+mod behavior;
+pub use behavior::{Behavior, Parameter};
+
+mod instruction;
+pub use instruction::Instruction;
+
+mod operand;
+pub use operand::{Operand, Jump, Place, Value};
 
 fn bool_true() -> bool { true }
 
@@ -37,7 +42,7 @@ pub struct Blueprint {
 
     #[serde( default,
         skip_serializing_if="Vec::is_empty" )]
-    pub registers: Vec<Option<OperandValue>>,
+    pub registers: Vec<Option<Value>>,
 
     #[serde( default,
         skip_serializing_if="Vec::is_empty" )]
@@ -45,15 +50,15 @@ pub struct Blueprint {
 
 }
 
-impl TryFrom<Value> for Blueprint {
+impl TryFrom<_Value> for Blueprint {
     type Error = LoadError;
-    fn try_from(_value: Value) -> Result<Self, Self::Error> {
+    fn try_from(_value: _Value) -> Result<Self, Self::Error> {
         Err(LoadError::from(
             "Structural representation of blueprints is not yet supported" ))
     }
 }
 
-impl From<Blueprint> for Value {
+impl From<Blueprint> for _Value {
     fn from(_value: Blueprint) -> Self {
         todo!(
             "Structural representation of blueprints is not yet supported" )
@@ -62,16 +67,16 @@ impl From<Blueprint> for Value {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Component {
-    item: String,
-    index: i32,
-    registers: Vec<Option<OperandValue>>,
-    behavior: Option<Behavior>,
+    pub item: String,
+    pub index: i32,
+    pub registers: Vec<Option<Value>>,
+    pub behavior: Option<Behavior>,
 }
 
 pub fn load_blueprint(exchange: &str)
 -> Result<Exchange<Blueprint, Behavior>, LoadError>
 {
-    type V = Value;
+    type V = _Value;
     let value = crate::loader::load_blueprint::<V, V, LoadError>(exchange)?;
     let value = value.transpose().ok_or_else(|| LoadError::from(
         "Blueprint or behavior should not be represented with nil" ))?;
@@ -81,7 +86,7 @@ pub fn load_blueprint(exchange: &str)
 pub fn dump_blueprint(blueprint: Exchange<Blueprint, Behavior>)
 -> Result<String, DumpError>
 {
-    type V = Value;
+    type V = _Value;
     let value = blueprint.map(Blueprint::into, Behavior::into)
         .map(Some, Some);
     crate::dumper::dump_blueprint::<V, V>(value)

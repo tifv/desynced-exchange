@@ -5,8 +5,8 @@ use serde::{
     Serialize, Serializer
 };
 
-use crate::{
-    common::TransparentRef,
+use crate::common::{
+    TransparentRef,
     string::{Str, SharedStr},
 };
 
@@ -245,7 +245,7 @@ macro_rules! forward_de_to_de_option {
     ($type:ty) => {
 
     impl<'de> ::serde::Deserialize<'de> for $type
-    where $type: $crate::serde::DeserializeOption<'de>
+    where $type: $crate::common::serde::DeserializeOption<'de>
     {
         fn deserialize<D>(de: D)
         -> ::std::result::Result<Self, D::Error>
@@ -254,7 +254,7 @@ macro_rules! forward_de_to_de_option {
             use ::std::result::Result::{Ok, Err};
             use ::std::option::Option::{None, Some};
             use ::serde::de::Error as _;
-            let value_option = <Self as $crate::serde::DeserializeOption>
+            let value_option = $crate::common::serde::DeserializeOption
                 ::deserialize_option(de)?;
             Ok(match value_option {
                 Some(value) => value,
@@ -281,7 +281,7 @@ pub trait SerializeOption : Serialize {
 macro_rules! impl_flat_se_option {
     ($type:ty) => {
 
-    impl $crate::serde::SerializeOption for $type {
+    impl $crate::common::serde::SerializeOption for $type {
         fn serialize_option<S>(this: ::std::option::Option<&Self>, ser: S)
         -> ::std::result::Result<S::Ok, S::Error>
         where S: ::serde::Serializer

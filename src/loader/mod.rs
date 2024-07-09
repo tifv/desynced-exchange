@@ -2,8 +2,10 @@ use std::marker::PhantomData;
 
 use crate::{
     error::LoadError as Error,
-    common::{u32_to_usize, LogSize, iexp2},
-    byteseq::Read,
+    common::{
+        u32_to_usize, LogSize, iexp2,
+        byteseq::Read,
+    },
     table_iter::{
         TableItem, AssocItem,
         TableSize,
@@ -16,32 +18,23 @@ use crate::{
     Exchange
 };
 
-pub(crate) mod decompress;
+mod decompress;
 
 pub fn load_blueprint<P, B, E>(exchange: &str)
 -> Result<Exchange<Option<P>, Option<B>>, Error>
 where P: Load, B: Load,
 {
-    decode_blueprint(decompress::decompress(exchange)?)
+    let encoded_data = decompress::decompress(exchange)?;
+    encoded_data.as_deref().map(decode, decode).transpose()
 }
 
-pub(crate) fn decode_blueprint<P, B>(encoded_data: Exchange<Vec<u8>>)
--> Result<Exchange<Option<P>, Option<B>>, Error>
-where P: Load, B: Load,
+fn decode<V: Load>(data: &[u8]) -> Result<Option<V>, Error>
 {
-    Ok(match encoded_data {
-        Exchange::Blueprint(encoded_body) =>
-            Exchange::Blueprint(P::load(
-                &mut Loader::new(encoded_body.as_slice())
-            )?),
-        Exchange::Behavior (encoded_body) =>
-            Exchange::Behavior (B::load(
-                &mut Loader::new(encoded_body.as_slice())
-            )?),
-    })
+    V::load(&mut Loader::new(data))
 }
 
-pub struct Loader<R: Read<u8>> {
+
+struct Loader<R: Read<u8>> {
     reader: R,
     max_array_len: u32,
 }
@@ -69,9 +62,9 @@ fn error_unsupported_size() -> Error {
 }
 
 struct TableHeader {
-    pub array_len: u32,
-    pub assoc_loglen: Option<LogSize>,
-    pub assoc_last_free: u32,
+    array_len: u32,
+    assoc_loglen: Option<LogSize>,
+    assoc_last_free: u32,
 }
 
 impl TableHeader {
@@ -87,7 +80,7 @@ impl TableHeader {
 impl<R: Read<u8>> Loader<R> {
 
     #[must_use]
-    pub fn new(reader: R) -> Self {
+    fn new(reader: R) -> Self {
         // The most compact representation of an array element
         // is bitmask, which is eight (nil) elements per one byte.
         let max_array_len = u32::try_from(reader.len())

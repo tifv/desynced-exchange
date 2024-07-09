@@ -8,13 +8,12 @@ use serde::{
 
 use crate::{
     error::LoadError,
-    string::Str,
-    value::{
-        Key, Value, Table,
-    },
-    serde::Identifier,
-    operand::{Operand, Jump},
+    Str,
+    common::serde::Identifier,
+    value::{Key, Value, Table, ArrayBuilder as TableArrayBuilder},
 };
+
+use super::operand::{Operand, Jump};
 
 #[derive(Debug, Clone)]
 pub struct Instruction {
@@ -198,7 +197,7 @@ impl<'de> serde::de::Visitor<'de> for InstructionBuilder {
 
 impl From<Instruction> for Value {
     fn from(this: Instruction) -> Value {
-        let mut table_array = Table::array_builder();
+        let mut table_array = TableArrayBuilder::new();
         table_array.extend( this.args.into_iter()
             .map(Option::<Value>::from) );
         let mut table = table_array.build();

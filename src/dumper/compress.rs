@@ -1,10 +1,12 @@
 use flate2::write::ZlibEncoder as ZippingWriter;
 
 use crate::{
-    common::ConstSlice,
-    byteseq::Write as _,
-    ascii::{self, Ascii},
-    intlim::{Int62, Int31, encode_base62, Base62Encode},
+    common::{
+        ConstSlice,
+        ascii::{self, Ascii},
+        byteseq::Write as _,
+        intlim::{Int62, Int31, encode_base62, Base62Encode},
+    },
     Exchange,
 };
 

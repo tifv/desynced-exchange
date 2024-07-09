@@ -2,9 +2,11 @@ use flate2::read::ZlibDecoder as UnZippingReader;
 
 use crate::{
     error::LoadError as Error,
-    byteseq::Read,
-    ascii::{Ascii, AsciiStr},
-    intlim::{Int62, Int31, decode_base62, Base62Decode},
+    common::{
+        ascii::{Ascii, AsciiStr},
+        byteseq::Read,
+        intlim::{Int62, Int31, decode_base62, Base62Decode},
+    },
     Exchange,
 };
 

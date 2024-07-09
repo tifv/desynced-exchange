@@ -11,7 +11,8 @@ use desynced_exchange::{
     value::Value,
     blueprint::{
         dump_blueprint, load_blueprint,
-        Exchange, Blueprint, Behavior,
+        Exchange,
+        Blueprint, Behavior,
     }
 };
 

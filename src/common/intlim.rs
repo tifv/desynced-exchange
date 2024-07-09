@@ -6,9 +6,11 @@ use thiserror::Error;
 
 use crate::{
     error::LoadError,
-    common::map_result,
-    ascii::{Ascii, char as ascii_char},
-    byteseq::Write,
+    common::{
+        map_result,
+        ascii::{Ascii, char as ascii_char},
+        byteseq::Write,
+    },
 };
 
 #[derive(Debug, Error)]
@@ -182,7 +184,7 @@ pub(crate) fn decode_base62(value: Ascii) -> Result<Int62, IntLimError> {
 impl Int31 {
     #[inline]
     #[must_use]
-    pub(super) fn add_31(self) -> Int62 {
+    pub(crate) fn add_31(self) -> Int62 {
         IntLim::<62>(u8::from(self) + 31)
     }
 }
@@ -196,7 +198,7 @@ impl From<Int31> for Int62 {
 
 impl Int62 {
     #[inline]
-    pub(super) fn try_as_31(self) -> Result<Int31, Int31> {
+    pub(crate) fn try_as_31(self) -> Result<Int31, Int31> {
         match self.0 {
             // SAFETY: `x` lies in range
             x @  0 ..= 30 => Ok (unsafe { Int31::new_unchecked(x) }),
@@ -369,7 +371,10 @@ where W: Write<u8>, CS: CheckSum<u32>
 
 #[cfg(test)]
 mod test {
-    use crate::{ascii::{Ascii, AsciiStr}, intlim::IntLimError};
+    use crate::common::{
+        ascii::{Ascii, AsciiStr},
+        intlim::IntLimError,
+    };
     use super::{IntLim, Int62, encode_base62, decode_base62};
 
     #[test]

@@ -382,10 +382,10 @@ impl From<AsciiString> for String {
 
 macro_rules! ascii_char {
     ($value:literal) => { {
-        const VALUE: $crate::ascii::Ascii = {
-            assert!($crate::ascii::char_is_ascii($value));
+        const VALUE: $crate::common::ascii::Ascii = {
+            assert!($crate::common::ascii::char_is_ascii($value));
             // SAFETY: we have just checked for ASCII value
-            unsafe { $crate::ascii::Ascii::from_byte_unchecked(
+            unsafe { $crate::common::ascii::Ascii::from_byte_unchecked(
                 $value as u8
             ) }
         };
@@ -397,11 +397,11 @@ pub(crate) use ascii_char as char;
 
 macro_rules! ascii_str {
     ($value:literal) => { {
-        const VALUE: &'static $crate::ascii::AsciiStr = {
+        const VALUE: &'static $crate::common::ascii::AsciiStr = {
             let value: &'static str = $value;
-            assert!($crate::ascii::str_is_ascii(value));
+            assert!($crate::common::ascii::str_is_ascii(value));
             // SAFETY: we have just checked for ASCII values
-            unsafe { $crate::ascii::AsciiStr::from_bytes_unchecked(
+            unsafe { $crate::common::ascii::AsciiStr::from_bytes_unchecked(
                 value.as_bytes()
             ) }
         };

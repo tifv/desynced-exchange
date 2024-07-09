@@ -6,15 +6,13 @@ use serde::{
 
 use crate::{
     error::LoadError,
-    string::Str,
-    serde::{
+    Str,
+    common::serde::{
         Identifier, PairVisitor,
         DeserializeOption, forward_de_to_de_option,
         SerializeOption,
     },
-    value::{
-        Key, Value as _Value, Table,
-    }
+    value::{Key, Value as _Value, Table},
 };
 
 enum EnumMatchError<'de, E, V> {
@@ -696,7 +694,7 @@ impl From<Coord> for _Value {
 #[cfg(test)]
 mod test {
 
-use crate::string::Str;
+use crate::Str;
 
 use super::{Coord, Operand, Place, Register, Value};
 

@@ -248,14 +248,11 @@
 
 use ::serde::{Deserialize, Serialize};
 
-mod common;
-mod byteseq;
-mod ascii;
-mod intlim;
-mod serde;
-
 pub mod error;
-pub mod string;
+
+mod common;
+pub use common::string::Str;
+
 pub mod table_iter;
 
 pub mod load;
@@ -266,29 +263,26 @@ pub mod loader;
 pub mod value;
 
 pub mod blueprint;
-pub mod behavior;
-pub mod instruction;
-pub mod operand;
 
 mod test;
 
 const MAX_ASSOC_LOGLEN: u8 = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-pub enum Exchange<P, B = P> {
-    Blueprint(P),
-    Behavior(B),
+pub enum Exchange<Blueprint, Behavior = Blueprint> {
+    Blueprint(Blueprint),
+    Behavior(Behavior),
 }
 
-impl<P, B> Exchange<P, B> {
-    pub fn as_ref(&self) -> Exchange<&P, &B> {
+impl<P, H> Exchange<P, H> {
+    pub fn as_ref(&self) -> Exchange<&P, &H> {
         match self {
             Self::Blueprint(value) => Exchange::Blueprint(value),
             Self::Behavior (value) => Exchange::Behavior (value),
         }
     }
-    pub fn as_deref(&self) -> Exchange<&P::Target, &B::Target>
-    where P: std::ops::Deref, B: std::ops::Deref
+    pub fn as_deref(&self) -> Exchange<&P::Target, &H::Target>
+    where P: std::ops::Deref, H: std::ops::Deref
     {
         match self {
             Self::Blueprint(value) => Exchange::Blueprint(value),
@@ -296,7 +290,7 @@ impl<P, B> Exchange<P, B> {
         }
     }
     pub fn map<P1, B1, PF, BF>(self, pf: PF, bf: BF) -> Exchange<P1, B1>
-    where PF: FnOnce(P) -> P1, BF: FnOnce(B) -> B1,
+    where PF: FnOnce(P) -> P1, BF: FnOnce(H) -> B1,
     {
         match self {
             Self::Blueprint(value) => Exchange::Blueprint(pf(value)),
@@ -316,8 +310,8 @@ impl<V> Exchange<V> {
     }
 }
 
-impl<P, B> Exchange<Option<P>, Option<B>> {
-    pub fn transpose(self) -> Option<Exchange<P, B>> {
+impl<P, H> Exchange<Option<P>, Option<H>> {
+    pub fn transpose(self) -> Option<Exchange<P, H>> {
         Some(match self {
             Self::Blueprint(value) => Exchange::Blueprint(value?),
             Self::Behavior (value) => Exchange::Behavior (value?),
@@ -325,8 +319,8 @@ impl<P, B> Exchange<Option<P>, Option<B>> {
     }
 }
 
-impl<P, B, E> Exchange<Result<P, E>, Result<B, E>> {
-    pub fn transpose(self) -> Result<Exchange<P, B>, E> {
+impl<P, H, E> Exchange<Result<P, E>, Result<H, E>> {
+    pub fn transpose(self) -> Result<Exchange<P, H>, E> {
         Ok(match self {
             Self::Blueprint(value) => Exchange::Blueprint(value?),
             Self::Behavior (value) => Exchange::Behavior (value?),

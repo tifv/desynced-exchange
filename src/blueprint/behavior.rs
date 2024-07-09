@@ -7,12 +7,15 @@ use serde::{
 
 use crate::{
     error::LoadError,
-    common::u32_to_usize,
-    string::Str,
-    value::{Key, Value, Table, table::ArrayBuilder as TableArrayBuilder},
-    serde::option_some as serde_option_some,
-    instruction::Instruction,
+    Str,
+    common::{
+        u32_to_usize,
+        serde::option_some as serde_option_some,
+    },
+    value::{Key, Value, Table, ArrayBuilder as TableArrayBuilder},
 };
+
+use super::instruction::Instruction;
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Behavior {
@@ -223,7 +226,7 @@ impl From<Behavior> for Value {
             parameters,
             subroutines,
         } = this;
-        let mut table_array = Table::array_builder();
+        let mut table_array = TableArrayBuilder::new();
         table_array.extend( instructions.into_iter()
             .map(Value::from) );
         let mut table = table_array.build();

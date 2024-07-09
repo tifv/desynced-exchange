@@ -34,6 +34,12 @@ impl<V> Table<V> {
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
+    pub fn get(&self, key: &Key) -> Option<&V> {
+        match self.find_item(key) {
+            Ok(index) => Some(&self.items[index].1),
+            Err(_) => None,
+        }
+    }
     pub fn insert(&mut self, key: Key, value: V) -> Option<V> {
         //! Returns the replaced element, if any.
         match self.find_item(&key) {
@@ -57,10 +63,6 @@ impl<V> Table<V> {
                 Some(value)
             },
         }
-    }
-    #[must_use]
-    pub fn array_builder() -> ArrayBuilder<V> {
-        ArrayBuilder::new()
     }
 }
 
@@ -120,6 +122,7 @@ where F: Fn(&V, &V) -> bool
 }
 
 impl<V> Table<V> {
+    #[inline]
     fn find_item(&self, key: &Key) -> Result<usize, usize> {
         use std::cmp::Ordering::{Less, Equal, Greater};
         let mut index = match *key {
@@ -716,9 +719,9 @@ use std::marker::PhantomData;
 
 use serde::{Deserialize, de};
 
-use crate::serde::{DeserializeOption, OptionSerdeWrap};
+use crate::common::serde::{DeserializeOption, OptionSerdeWrap};
 
-use super::Table;
+use super::{Table, ArrayBuilder};
 
 impl<'de, V> Deserialize<'de> for Table<V>
 where V: DeserializeOption<'de>
@@ -754,7 +757,7 @@ where V: DeserializeOption<'de>
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
     where A: de::SeqAccess<'de>
     {
-        let mut table_builder = Table::array_builder();
+        let mut table_builder = ArrayBuilder::new();
         while let Some(OptionSerdeWrap(value)) = seq.next_element()? {
             table_builder.push_option(value);
         }
@@ -781,7 +784,7 @@ pub(super) mod ser {
 
 use serde::{Serialize, ser};
 
-use crate::serde::{SerializeOption, OptionRefSerdeWrap};
+use crate::common::serde::{SerializeOption, OptionRefSerdeWrap};
 
 use super::Table;
 
@@ -806,7 +809,7 @@ where V: SerializeOption
 #[cfg(test)]
 mod test {
 
-use crate::string::Str;
+use crate::Str;
 
 use super::{Key, Table};
 

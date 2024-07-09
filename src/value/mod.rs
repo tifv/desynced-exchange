@@ -1,6 +1,7 @@
-use crate::string::Str;
+use crate::Str;
 
-pub mod table;
+mod table;
+pub use table::ArrayBuilder;
 
 #[derive( Clone,
     PartialEq, Eq, PartialOrd, Ord, Hash )]
@@ -121,7 +122,7 @@ impl std::fmt::Debug for Value {
 mod load {
 
 use crate::{
-    string::Str,
+    Str,
     load::{
         Error,
         KeyLoad, KeyBuilder as KeyBuilderTr,
@@ -252,9 +253,9 @@ mod de {
 use serde::{Deserialize, de};
 
 use crate::{
-    string::Str,
-    serde::{
-        DeserializeOption, forward_de_to_de_option,
+    Str,
+    common::serde::{ self as common_serde,
+        DeserializeOption,
     },
 };
 
@@ -277,7 +278,7 @@ impl<'de> de::Visitor<'de> for KeyVisitor {
         write!(fmt, "an integer or a string")
     }
 
-    crate::serde::delegate_to_i32!();
+    common_serde::delegate_to_i32!();
 
     fn visit_i32<E>(self, v: i32) -> Result<Self::Value, E>
     where E: de::Error
@@ -301,7 +302,7 @@ impl<'de> DeserializeOption<'de> for Value {
     }
 }
 
-forward_de_to_de_option!(Value);
+common_serde::forward_de_to_de_option!(Value);
 
 struct ValueVisitor;
 
@@ -318,7 +319,7 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         Ok(Some(Value::Boolean(v)))
     }
 
-    crate::serde::delegate_to_i32!();
+    common_serde::delegate_to_i32!();
 
     fn visit_i32<E>(self, v: i32) -> Result<Self::Value, E>
     where E: de::Error
@@ -326,7 +327,7 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         Ok(Some(Value::Integer(v)))
     }
 
-    crate::serde::delegate_to_f64!();
+    common_serde::delegate_to_f64!();
 
     fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
     where E: de::Error
@@ -382,7 +383,7 @@ mod ser {
 
 use ::serde::{Serialize, ser};
 
-use crate::serde::impl_flat_se_option;
+use crate::common::serde as common_serde;
 
 use super::{Key, Value};
 
@@ -411,7 +412,7 @@ impl Serialize for Value {
     }
 }
 
-impl_flat_se_option!(Value);
+common_serde::impl_flat_se_option!(Value);
 
 }
 

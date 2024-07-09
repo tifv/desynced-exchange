@@ -2,9 +2,15 @@ use std::mem::MaybeUninit;
 
 use thiserror::Error;
 
+pub(crate) mod string;
+pub(crate) mod ascii;
+pub(crate) mod byteseq;
+pub(crate) mod intlim;
+pub(crate) mod serde;
+
 #[must_use]
 #[inline]
-pub const fn u32_to_usize(len: u32) -> usize {
+pub(crate) const fn u32_to_usize(len: u32) -> usize {
     assert!({ const OK: bool = {
         let ok = u32::BITS <= usize::BITS;
         assert!(ok); ok
@@ -16,7 +22,7 @@ pub type LogSize = u8;
 
 #[must_use]
 #[inline]
-pub const fn iexp2(loglen: Option<LogSize>) -> u32 {
+pub(crate) const fn iexp2(loglen: Option<LogSize>) -> u32 {
     let Some(loglen) = loglen else { return 0 };
     match 1_u32.checked_shl(loglen as u32) {
         Some(exp) if exp - 1 <= (i32::MAX as u32) => exp,
@@ -31,7 +37,7 @@ pub(crate) struct NotPowerOfTwoError;
 
 #[must_use]
 #[inline]
-pub const fn ilog2_ceil(len: usize) -> Option<LogSize> {
+pub(crate) const fn ilog2_ceil(len: usize) -> Option<LogSize> {
     //! Upper-rounded base 2 logarithm.
     //! Returns `None` if `len` is zero.
     let Some(mut ilog2) = len.checked_ilog2() else {
@@ -44,7 +50,7 @@ pub const fn ilog2_ceil(len: usize) -> Option<LogSize> {
 }
 
 #[inline]
-pub const fn ilog2_exact(len: usize)
+pub(crate) const fn ilog2_exact(len: usize)
 -> Result<Option<LogSize>, NotPowerOfTwoError> {
     //! Base 2 logarithm.
     //! Returns `None` if `len` is not a power of two.

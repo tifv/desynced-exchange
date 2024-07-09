@@ -30,8 +30,8 @@ impl From<String> for LoadError {
     }
 }
 
-error_from_error!(LoadError: <- crate::ascii::AsciiError);
-error_from_error!(LoadError: <- crate::intlim::IntLimError);
+error_from_error!(LoadError: <- crate::common::ascii::AsciiError);
+error_from_error!(LoadError: <- crate::common::intlim::IntLimError);
 error_from_error!(LoadError: <- std::str::Utf8Error);
 error_from_error!(LoadError: <- std::io::Error);
 

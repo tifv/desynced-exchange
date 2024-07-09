@@ -1,7 +1,9 @@
 use crate::{
-    common::{LogSize, iexp2},
-    byteseq::Write,
     error::DumpError as Error,
+    common::{
+        LogSize, iexp2,
+        byteseq::Write,
+    },
     table_iter::{TableItem, AssocItem},
     dump::{
         KeyDump, Dump, TableDumpIter,
@@ -10,30 +12,25 @@ use crate::{
     Exchange,
 };
 
-pub(crate) mod compress;
+mod compress;
 
 const EXCEEDED_LOGLEN: LogSize = crate::MAX_ASSOC_LOGLEN + 1;
 
-pub fn dump_blueprint<P, B>(exchange: Exchange<Option<P>, Option<B>>)
+pub fn dump_blueprint<P, H>(exchange: Exchange<Option<P>, Option<H>>)
 -> Result<String, Error>
-where P: Dump, B: Dump
+where P: Dump, H: Dump
 {
-    let encoded_body = encode_blueprint(exchange)?;
+    let encoded_body = exchange.map(encode, encode).transpose()?;
     Ok(compress::compress(encoded_body.as_deref()))
 }
 
-pub(crate) fn encode_blueprint<P, B>(exchange: Exchange<Option<P>, Option<B>>)
--> Result<Exchange<Vec<u8>>, Error>
-where P: Dump, B: Dump
-{
-    #[inline]
-    fn dump<V: Dump>(value: Option<V>) -> Result<Vec<u8>, Error> {
-        let mut dumper = Dumper::new(Vec::with_capacity(128));
-        V::dump_option(value.as_ref(), &mut dumper)?;
-        Ok(dumper.end())
-    }
-    exchange.map(dump, dump).transpose()
+#[inline]
+fn encode<V: Dump>(value: Option<V>) -> Result<Vec<u8>, Error> {
+    let mut dumper = Dumper::new(Vec::with_capacity(128));
+    V::dump_option(value.as_ref(), &mut dumper)?;
+    Ok(dumper.end())
 }
+
 
 #[inline]
 const fn mask(loglen: u8) -> u32 {
@@ -43,17 +40,17 @@ const fn mask(loglen: u8) -> u32 {
     (1_u32 << loglen) - 1
 }
 
-pub(super) struct Dumper<W: Write<u8>> {
+struct Dumper<W: Write<u8>> {
     writer: W,
 }
 
 impl<W: Write<u8>> Dumper<W> {
 
-    pub(super) fn new(writer: W) -> Self {
+    fn new(writer: W) -> Self {
         Self { writer }
     }
 
-    pub(super) fn end(self) -> W {
+    fn end(self) -> W {
         self.writer
     }
 
