@@ -229,7 +229,7 @@ impl From<Behavior> for Value {
         let mut table_array = TableArrayBuilder::new();
         table_array.extend( instructions.into_iter()
             .map(Value::from) );
-        let mut table = table_array.build();
+        let mut table = table_array.build().into_builder();
         table.extend([
             ("name"      , behavior_name.map(Value::String)),
             ("desc"      , description.map(Value::String)),
@@ -252,7 +252,7 @@ impl From<Behavior> for Value {
             let value = value?;
             Some((Key::from(name), value))
         }));
-        Value::Table(table)
+        Value::Table(table.build())
     }
 }
 

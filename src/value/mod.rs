@@ -1,7 +1,7 @@
 use crate::Str;
 
 mod table;
-pub use table::ArrayBuilder;
+pub use table::{ArrayBuilder, TableBuilder};
 
 #[derive( Clone,
     PartialEq, Eq, PartialOrd, Ord, Hash )]
@@ -92,6 +92,27 @@ impl From<&'static str> for Key {
 impl From<Str> for Key {
     fn from(string: Str) -> Self {
         Self::Name(string)
+    }
+}
+
+impl TryFrom<Value> for Key {
+    type Error = crate::error::DumpError;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        Ok(match value {
+            Value::Integer(index) => Self::Index(index),
+            Value::String(string) => Self::Name(string),
+            Value::Boolean(_) | Value::Float(_) | Value::Table(_)
+                => return Err(Self::Error::from(
+                    "the value cannot serve as a key")),
+        })
+    }
+}
+
+impl TryFrom<Option<Value>> for Key {
+    type Error = crate::error::DumpError;
+    fn try_from(value: Option<Value>) -> Result<Self, Self::Error> {
+        Self::try_from(value.ok_or_else(|| Self::Error::from(
+            "nil value cannot serve as a key"))?)
     }
 }
 
@@ -278,7 +299,7 @@ impl<'de> de::Visitor<'de> for KeyVisitor {
         write!(fmt, "an integer or a string")
     }
 
-    common_serde::delegate_to_i32!();
+    common_serde::visit_forward_to_i32!();
 
     fn visit_i32<E>(self, v: i32) -> Result<Self::Value, E>
     where E: de::Error
@@ -319,7 +340,7 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         Ok(Some(Value::Boolean(v)))
     }
 
-    common_serde::delegate_to_i32!();
+    common_serde::visit_forward_to_i32!();
 
     fn visit_i32<E>(self, v: i32) -> Result<Self::Value, E>
     where E: de::Error
@@ -327,7 +348,7 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         Ok(Some(Value::Integer(v)))
     }
 
-    common_serde::delegate_to_f64!();
+    common_serde::visit_forward_to_f64!();
 
     fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
     where E: de::Error

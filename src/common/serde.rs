@@ -109,12 +109,12 @@ impl<'de> de::Visitor<'de> for IgnoringVisitor {
     fn visit_i32<E>(self, _v: i32) -> Result<Self::Value, E>
     where E: de::Error
     { Ok(IgnoredValue) }
-    delegate_to_i32!();
+    visit_forward_to_i32!();
 
     fn visit_f64<E>(self, _v: f64) -> Result<Self::Value, E>
     where E: de::Error
     { Ok(IgnoredValue) }
-    delegate_to_f64!();
+    visit_forward_to_f64!();
 
     fn visit_bool<E>(self, _v: bool) -> Result<Self::Value, E>
     where E: de::Error
@@ -183,7 +183,7 @@ where A: Deserialize<'de>, B: Deserialize<'de>
 }
 
 
-macro_rules! delegate_to_i32 {
+macro_rules! visit_forward_to_i32 {
     () => {
 
     fn visit_i8<E>(self, v: i8) -> Result<Self::Value, E>
@@ -217,9 +217,9 @@ macro_rules! delegate_to_i32 {
     };
 }
 
-pub(crate) use delegate_to_i32 as delegate_to_i32;
+pub(crate) use visit_forward_to_i32 as visit_forward_to_i32;
 
-macro_rules! delegate_to_f64 {
+macro_rules! visit_forward_to_f64 {
     () => {
 
     fn visit_f32<E>(self, v: f32) -> Result<Self::Value, E>
@@ -229,7 +229,7 @@ macro_rules! delegate_to_f64 {
     };
 }
 
-pub(crate) use delegate_to_f64 as delegate_to_f64;
+pub(crate) use visit_forward_to_f64 as visit_forward_to_f64;
 
 
 pub trait DeserializeOption<'de> : Deserialize<'de> {

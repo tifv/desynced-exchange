@@ -264,6 +264,8 @@ pub mod value;
 
 pub mod blueprint;
 
+pub mod ser;
+
 mod test;
 
 const MAX_ASSOC_LOGLEN: u8 = 20;
@@ -306,6 +308,15 @@ impl<V> Exchange<V> {
         match self {
             Self::Blueprint(value) => Exchange::Blueprint(f(value)),
             Self::Behavior (value) => Exchange::Behavior (f(value)),
+        }
+    }
+}
+
+impl Exchange<()> {
+    pub fn with_value<V>(self, value: V) -> Exchange<V> {
+        match self {
+            Self::Blueprint(()) => Exchange::Blueprint(value),
+            Self::Behavior (()) => Exchange::Behavior (value),
         }
     }
 }

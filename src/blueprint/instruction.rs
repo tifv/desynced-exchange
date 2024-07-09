@@ -200,7 +200,7 @@ impl From<Instruction> for Value {
         let mut table_array = TableArrayBuilder::new();
         table_array.extend( this.args.into_iter()
             .map(Option::<Value>::from) );
-        let mut table = table_array.build();
+        let mut table = table_array.build().into_builder();
         table.extend([
             ("op"  , Some(Value::String(this.operation))),
             ("next", Option::<Value>::from(this.next)),
@@ -216,7 +216,7 @@ impl From<Instruction> for Value {
             }
             (Key::Name(name), value)
         })));
-        Value::Table(table)
+        Value::Table(table.build())
     }
 }
 

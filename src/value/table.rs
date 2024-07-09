@@ -40,48 +40,14 @@ impl<V> Table<V> {
             Err(_) => None,
         }
     }
-    pub fn insert(&mut self, key: Key, value: V) -> Option<V> {
-        //! Returns the replaced element, if any.
-        match self.find_item(&key) {
-            Ok(index) => Some(std::mem::replace(
-                &mut self.items[index], (key, value) ).1),
-            Err(index) => {
-                self.items.insert(index, (key, value));
-                self.indices_fix();
-                None
-            },
-        }
-    }
-    pub fn remove(&mut self, key: &Key) -> Option<V> {
-        match self.find_item(key) {
-            Err(_) => None,
-            Ok(index) => {
-                let (_, value) = self.items.remove(index);
-                let Range { start, end } = &mut self.indices;
-                if *start > index { *start -= 1; }
-                if *end   > index { *end   -= 1; }
-                Some(value)
-            },
-        }
+    pub fn into_builder(self) -> TableBuilder<V> {
+        TableBuilder { table: self }
     }
 }
 
 impl<K: Into<Key>, V> FromIterator<(K, V)> for Table<V> {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
-        let mut this = Self::new();
-        this.extend(iter);
-        this
-    }
-}
-
-impl<K: Into<Key>, V> Extend<(K, V)> for Table<V> {
-    fn extend<I>(&mut self, iter: I)
-    where I: IntoIterator<Item = (K, V)>
-    {
-        for (key, value) in iter {
-            self.push_item(key.into(), value);
-        }
-        self.sort_items();
+        TableBuilder::from_iter(iter).build()
     }
 }
 
@@ -181,9 +147,6 @@ impl<V> Table<V> {
             },
             _ => break,
         } }
-        self.indices_fix_end()
-    }
-    fn indices_fix_end(&mut self) {
         while let Some(&(Key::Index(_), _)) =
             self.items.get(self.indices.end)
         {
@@ -251,6 +214,49 @@ impl<V> Extend<Option<V>> for ArrayBuilder<V> {
     fn extend<T: IntoIterator<Item=Option<V>>>(&mut self, iter: T) {
         for value in iter {
             self.push_option(value);
+        }
+    }
+}
+
+pub struct TableBuilder<V> {
+    table: Table<V>,
+}
+
+impl<V> TableBuilder<V> {
+    #[allow(clippy::new_without_default)]
+    #[must_use]
+    #[inline]
+    pub fn new() -> Self {
+        Self { table: Table::new() }
+    }
+    #[must_use]
+    #[inline]
+    pub fn build(self) -> Table<V> {
+        let mut table = self.table;
+        table.sort_items();
+        table
+    }
+    #[inline]
+    pub fn insert(&mut self, key: Key, value: V) {
+        self.table.push_item(key, value)
+    }
+}
+
+impl<V, K> FromIterator<K> for TableBuilder<V>
+where Self : Extend<K>
+{
+    #[inline]
+    fn from_iter<T: IntoIterator<Item=K>>(iter: T) -> Self {
+        let mut this = Self::new();
+        this.extend(iter);
+        this
+    }
+}
+
+impl<K: Into<Key>, V> Extend<(K, V)> for TableBuilder<V> {
+    fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
+        for (key, value) in iter {
+            self.table.push_item(key.into(), value);
         }
     }
 }
@@ -573,9 +579,9 @@ impl<V> Table<V> {
                     panic!("unexpected item"),
             }
         }
-        let mut table = array.build();
+        let mut table = array.build().into_builder();
         table.extend(assoc.build::<T::Error>()?.into_map_iter());
-        Ok(table)
+        Ok(table.build())
     }
 }
 
@@ -811,7 +817,7 @@ mod test {
 
 use crate::Str;
 
-use super::{Key, Table};
+use super::{Key, TableBuilder};
 
 use super::dedup_assign;
 
@@ -855,16 +861,18 @@ fn test_insert_remove() {
     for s in 'a' ..= 'z' {
         test_keys.push(Key::Name(Str::from(String::from(s).as_str())));
     }
-    let mut table = Table::new();
+    let mut table = TableBuilder::new();
     for key in &test_keys {
-        assert!(table.insert(key.clone(), key.clone()).is_none());
+        table.insert(key.clone(), key.clone());
     }
     for key in &test_keys {
-        assert!(table.insert(key.clone(), key.clone()).is_some());
+        table.insert(key.clone(), key.clone());
     }
-    for key in &test_keys {
-        assert_eq!(table.remove(key).as_ref(), Some(key));
-    }
+    let table = table.build();
+    assert!(table.len() == test_keys.len());
+    assert!(
+        table.into_iter().map(|(k, _)| k).collect::<Vec<_>>()
+        == test_keys );
 }
 
 }
