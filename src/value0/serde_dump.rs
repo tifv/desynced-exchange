@@ -373,7 +373,7 @@ impl<'de> Visitor<'de> for TableVisitor {
     where E: serde::de::Error
     {
         let load_err_as_custom = E::custom::<crate::error::LoadError>;
-        TableLoadBuilder::new(0, None).finish().map_err(load_err_as_custom)
+        TableLoadBuilder::new(0, None).build().map_err(load_err_as_custom)
     }
 
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
@@ -386,7 +386,7 @@ impl<'de> Visitor<'de> for TableVisitor {
                 "a sequence should not be here (unless empty)" ));
         };
         let builder = TableLoadBuilder::new(0, None);
-        builder.finish().map_err(load_err_as_custom)
+        builder.build().map_err(load_err_as_custom)
     }
 
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
@@ -408,10 +408,7 @@ impl<'de> Visitor<'de> for TableVisitor {
         }
         let array_len = array.len().try_into()
             .map_err(A::Error::custom)?;
-        let assoc_loglen = if assoc.is_empty() { None } else {Some(
-            ilog2_exact(assoc.len()).ok_or_else(|| A::Error::custom(
-                "the number of assoc items should be a power of two" ))?
-        )};
+        let assoc_loglen = ilog2_exact(assoc.len()).map_err(A::Error::custom)?;
         let mut builder = TableLoadBuilder::new(array_len, assoc_loglen);
         for (index, value) in array.into_iter().enumerate() {
             let index = index.try_into().map_err(A::Error::custom)?;
@@ -431,7 +428,7 @@ impl<'de> Visitor<'de> for TableVisitor {
         if let Some(assoc_last_free) = assoc_last_free {
             builder.set_assoc_last_free(assoc_last_free);
         }
-        builder.finish().map_err(load_err_as_custom)
+        builder.build().map_err(load_err_as_custom)
     }
 }
 

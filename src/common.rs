@@ -1,5 +1,6 @@
 use std::mem::MaybeUninit;
 
+use thiserror::Error;
 
 #[must_use]
 #[inline]
@@ -24,6 +25,10 @@ pub const fn iexp2(loglen: Option<LogSize>) -> u32 {
     }
 }
 
+#[derive(Debug, Error)]
+#[error("The number should be a power of two")]
+pub(crate) struct NotPowerOfTwoError;
+
 #[must_use]
 #[inline]
 pub const fn ilog2_ceil(len: usize) -> Option<LogSize> {
@@ -38,18 +43,18 @@ pub const fn ilog2_ceil(len: usize) -> Option<LogSize> {
     Some(ilog2 as u8)
 }
 
-#[must_use]
 #[inline]
-pub const fn ilog2_exact(len: usize) -> Option<LogSize> {
+pub const fn ilog2_exact(len: usize)
+-> Result<Option<LogSize>, NotPowerOfTwoError> {
     //! Base 2 logarithm.
     //! Returns `None` if `len` is not a power of two.
     let Some(ilog2) = len.checked_ilog2() else {
-        return None;
+        return Ok(None);
     };
     if ilog2 > len.trailing_zeros() {
-        return None;
+        return Err(NotPowerOfTwoError);
     }
-    Some(ilog2 as u8)
+    Ok(Some(ilog2 as u8))
 }
 
 

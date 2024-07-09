@@ -8,8 +8,7 @@ use desynced_exchange::{
     error::LoadError,
     dumper::dump_blueprint as dump,
     loader::load_blueprint as load,
-    value::map_tree::Value as MTValue,
-    value::serde_dump::Value as DValue,
+    value::Value,
     blueprint::{
         dump_blueprint, load_blueprint,
         Exchange, Blueprint, Behavior,
@@ -82,7 +81,6 @@ impl TryFrom<&str> for DecodeStyle {
 enum InterRepr {
     Struct,
     MapTree,
-    TableDump,
 }
 
 impl TryFrom<&str> for InterRepr {
@@ -92,7 +90,6 @@ impl TryFrom<&str> for InterRepr {
         Ok(match value {
             "struct"  => Self::Struct,
             "map_tree"    => Self::MapTree,
-            "table_dump"    => Self::TableDump,
             other => return Err(JsError::new(
                 &format!("unrecognized intermediate repr {other:?}") )),
         })
@@ -130,22 +127,11 @@ pub fn decode(encoded: &str, params: &DecodeParameters)
                 load_blueprint(encoded)?,
                 params ),
         InterRepr::MapTree => {
-            use MTValue as V;
             let value = load::<_,_,LoadError>(encoded)?
                 .transpose().ok_or_else(|| JsError::new(
                     "Blueprint or behavior should not \
-                    be represented with nil" ))?
-                .map_mono(V);
-            serialize::<Exchange<V, V>>(value, params)
-        }
-        InterRepr::TableDump => {
-            use DValue as V;
-            let value = load::<_,_,LoadError>(encoded)?
-                .transpose().ok_or_else(|| JsError::new(
-                    "Blueprint or behavior should not \
-                    be represented with nil" ))?
-                .map_mono(V);
-            serialize::<Exchange<V, V>>(value, params)
+                    be represented with nil" ))?;
+            serialize::<Exchange<Value>>(value, params)
         }
     }
 }
@@ -193,17 +179,9 @@ pub fn encode(decoded: &str, params: &EncodeParameters)
         InterRepr::Struct =>
             dump_blueprint(deserialise(decoded, params)?)?,
         InterRepr::MapTree => {
-            use MTValue as V;
             dump(
-                deserialise::<Exchange<V, V>>(decoded, params)?
-                    .map_mono(V::into_inner).map_mono(Some)
-            )?
-        },
-        InterRepr::TableDump => {
-            use DValue as V;
-            dump(
-                deserialise::<Exchange<V, V>>(decoded, params)?
-                    .map_mono(V::into_inner).map_mono(Some)
+                deserialise::<Exchange<Value>>(decoded, params)?
+                    .map_mono(Some)
             )?
         },
     })

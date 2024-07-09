@@ -1,47 +1,29 @@
 #![allow(clippy::use_self)]
 
+use std::collections::btree_map::BTreeMap as SortedMap;
+
 use serde::{
     ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer
 };
 
 use crate::{
     error::LoadError,
-    common::ilog2_ceil,
     string::Str,
     value::{
-        TableIntoError as TableError,
         Key, Value, Table,
-        TableBuilder,
-        LimitedVec,
-        map_tree::Value as ReprValue,
     },
-    serde::{
-        Identifier,
-        ExtraFields, define_field_names,
-    },
+    serde::Identifier,
     operand::{Operand, Jump},
 };
-
-define_field_names!(
-    pub ExtraInstructionNames,
-    [
-        "c", "txt", "sub",
-        "cmt", "nx", "ny",
-    ]
-);
-
-pub type ExtraInstructionFields =
-    ExtraFields<ExtraInstructionNames, ReprValue>;
-
-// subroutines can create instructions with an arbitrary number of parameters
-const INSTRUCTION_MAX_ARGS: usize = 256;
 
 #[derive(Debug, Clone)]
 pub struct Instruction {
     pub operation: Str,
     pub args: Vec<Operand>,
     pub next: Jump,
-    pub extra: ExtraInstructionFields,
+    pub extra: SortedMap<Str, Value>,
+    pub comment: Option<Str>,
+    pub offset: Option<(f64, f64)>,
 }
 
 impl TryFrom<Value> for Instruction {
@@ -67,49 +49,62 @@ struct InstructionBuilder {
     operation: Option<Str>,
     args: Vec<Operand>,
     next: Option<Jump>,
-    extra: ExtraInstructionFields,
+    extra: SortedMap<Str, Value>,
+    comment: Option<Str>,
+    offset: (Option<f64>, Option<f64>),
 }
 
 impl InstructionBuilder {
 
     fn build_from(table: Table) -> Result<Instruction, LoadError> {
-        const MAX_ARGS: usize = INSTRUCTION_MAX_ARGS;
         let mut this = Self::default();
-        let array: LimitedVec<MAX_ARGS, _> = table.try_into_seq_and_named(
-            |name, value| match name.as_ref() {
-                "op"   => this.set_operation (value),
-                "next" => this.set_next      (value),
-                "args" => Err(Self::err_unexpected_key(Key::from("args"))),
-                _ => {
-                    if this.extra.insert(name, ReprValue(value)).is_some() {
-                        unreachable!("duplicate key");
-                    } else {
-                        Ok(())
+        let mut array = Vec::new();
+        // Technically, instructions can have unlimited number
+        // of arguments, and all of them can be None. But if
+        // we do not limit the number of arguments somehow, we can be
+        // tricked out of memory by a very large index.
+        let max_index = i32::try_from(table.len() * 2 + 256)
+            .unwrap_or(i32::MAX);
+        for (key, value) in table {
+            match key {
+                Key::Index(index) if (1 ..= max_index).contains(&index)
+                => {
+                    let Ok(index) = usize::try_from(index - 1)
+                        else { unreachable!(); };
+                    if array.len() <= index {
+                        array.resize_with(index + 1, || None);
                     }
+                    array[index] = Some(value);
                 },
-            },
-            Self::err_from_table_index )?;
-        let array = array.get();
-        assert!(this.args.is_empty());
+                Key::Index(index) if index <= 0 =>
+                    return Err(Self::err_unexpected_key(key)),
+                Key::Index(index) =>
+                    return Err(Self::err_non_continuous(index)),
+                Key::Name(name) => match name.as_ref() {
+                    "op"   => this.set_operation (value)?,
+                    "next" => this.set_next      (value)?,
+                    "cmt"  => this.set_comment   (value)?,
+                    "nx"   => this.set_offset_x  (value)?,
+                    "ny"   => this.set_offset_y  (value)?,
+                    _ => {
+                        let None = this.extra.insert(name, value) else {
+                            unreachable!("duplicate key shouldn't be");
+                        };
+                    },
+                },
+            }
+        }
         this.args.reserve_exact(array.len());
         for value in array {
             this.args.push(Operand::try_from(value)?);
         }
-        this.finish()
-    }
-
-    fn err_from_table_index(error: TableError) -> LoadError {
-        match error {
-            TableError::NonContinuous(index) =>
-                Self::err_non_continuous(index),
-            TableError::UnexpectedKey(key) =>
-                Self::err_unexpected_key(key),
-        }
+        this.build()
     }
 
     fn err_non_continuous(index: i32) -> LoadError { LoadError::from(format!(
         "instruction representation should have \
-         argument indices in a range `1..`: {index:?}" )) }
+         argument indices in a range `1..N` (for a resonable N), \
+         not {index:?}" )) }
 
     fn err_unexpected_key(key: Key) -> LoadError { LoadError::from(format!(
         "instruction representation should not have {key:?} key" )) }
@@ -126,10 +121,37 @@ impl InstructionBuilder {
         self.next = Some(Jump::try_from(Some(value))?); Ok(())
     }
 
-    fn finish(self) -> Result<Instruction, LoadError> {
+    fn set_comment(&mut self, value: Value) -> Result<(), LoadError> {
+        let Value::String(value) = value else {
+            return Err(LoadError::from(
+                "instruction's comment should be a string" ));
+        };
+        self.comment = Some(value); Ok(())
+    }
+
+    fn set_float(field: &mut Option<f64>, value: Value)
+    -> Result<(), LoadError> {
+        let Value::Float(value) = value else {
+            return Err(LoadError::from(
+                "instruction's offset should be a float" ));
+        };
+        *field = Some(value); Ok(())
+    }
+
+    fn set_offset_x(&mut self, value: Value) -> Result<(), LoadError> {
+        Self::set_float(&mut self.offset.0, value)
+    }
+
+    fn set_offset_y(&mut self, value: Value) -> Result<(), LoadError> {
+        Self::set_float(&mut self.offset.1, value)
+    }
+
+    fn build(self) -> Result<Instruction, LoadError> {
         let Self {
             operation, args, next,
             extra,
+            comment,
+            offset,
         } = self;
         let next = Jump::unwrap_option(next);
         let Some(operation) = operation else {
@@ -139,6 +161,8 @@ impl InstructionBuilder {
         Ok(Instruction {
             operation, args, next,
             extra,
+            comment,
+            offset: Option::zip(offset.0, offset.1),
         })
     }
 }
@@ -157,39 +181,43 @@ impl<'de> serde::de::Visitor<'de> for InstructionBuilder {
         use serde::de::Error as _;
         while let Some(name) = map.next_key::<Identifier>()?.map(Str::from) {
             match name.as_ref() {
-                "op"    => self.operation = Some(map.next_value()?),
-                "args"  => self.args      = map.next_value()?,
-                "next"  => self.next      = Some(map.next_value()?),
-                _ => {
-                    self.extra.consume_next_value(name, &mut map)?;
-                },
+                "op"      => self.operation = Some(map.next_value()?),
+                "args"    => self.args      = map.next_value()?,
+                "next"    => self.next      = Some(map.next_value()?),
+                "comment" => self.comment   = Some(map.next_value()?),
+                "offset"  => self.offset    = Some(map.next_value::<>()?).unzip(),
+                "extra"   => self.extra     = map.next_value()?,
+                _ => return Err(A::Error::custom(
+                    format!("instruction should not have “{name:?}” key") ))
             }
         }
-        self.finish().map_err(A::Error::custom)
+        self.build().map_err(A::Error::custom)
     }
 
 }
 
 impl From<Instruction> for Value {
     fn from(this: Instruction) -> Value {
-        let mut table = TableBuilder::new(
-            this.args.len().try_into()
-                .expect("length should fit"),
-            ilog2_ceil(
-                2 // operation, next
-                + this.extra.len()
-            ),
-        );
-        table.array_extend( this.args.into_iter()
+        let mut table_array = Table::array_builder();
+        table_array.extend( this.args.into_iter()
             .map(Option::<Value>::from) );
-        table.assoc_insert("op", Some(Value::String(this.operation)));
-        if let Some(next_value) = this.next.into() {
-            table.assoc_insert("next", Some(next_value));
-        }
-        for (key, ReprValue(value)) in this.extra {
-            table.assoc_insert(key, Some(value));
-        }
-        Value::Table(table.finish())
+        let mut table = table_array.build();
+        table.extend([
+            ("op"  , Some(Value::String(this.operation))),
+            ("next", Option::<Value>::from(this.next)),
+            ("cmt" , this.comment.map(Value::String)),
+            ("nx"  , this.offset.map(|(x,_)| Value::Float(x))),
+            ("ny"  , this.offset.map(|(_,y)| Value::Float(y))),
+        ].into_iter().filter_map(|(name, value)| {
+            let value = value?;
+            Some((Key::from(name), value))
+        }).chain(this.extra.into_iter().map(|(name, value)| {
+            if matches!(name.as_ref(), "op" | "next" | "cmt" | "nx" | "ny") {
+                panic!("key {name:?} should not be in extra keys");
+            }
+            (Key::Name(name), value)
+        })));
+        Value::Table(table)
     }
 }
 
@@ -199,18 +227,33 @@ impl Serialize for Instruction {
     {
         let mut ser = ser.serialize_struct(
             "Instruction",
-            2 // op, next,
+            2 // op and next
             + usize::from(!self.args.is_empty())
-            + self.extra.len(),
+            + usize::from(!self.extra.is_empty())
+            + usize::from(self.comment.is_some())
+            + usize::from(self.offset.is_some())
         )?;
+
         ser.serialize_field("op", &self.operation)?;
+
         if !self.args.is_empty() {
             ser.serialize_field("args", &self.args)?;
-        } else {
-            ser.skip_field("args")?;
-        }
+        } else { ser.skip_field("args")?; }
+
         ser.serialize_field("next", &self.next)?;
-        self.extra.serialize_into_struct::<S>(&mut ser)?;
+
+        if !self.extra.is_empty() {
+            ser.serialize_field("extra", &self.extra)?;
+        } else { ser.skip_field("extra")?; }
+
+        if let Some(ref comment) = self.comment {
+            ser.serialize_field("comment", comment)?;
+        } else { ser.skip_field("comment")?; }
+
+        if let Some(ref offset) = self.offset {
+            ser.serialize_field("offset", offset)?;
+        } else { ser.skip_field("offset")?; }
+
         ser.end()
     }
 }

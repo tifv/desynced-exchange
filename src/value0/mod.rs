@@ -1,10 +1,28 @@
+use serde::{Deserialize, Serialize};
+
+mod table;
+
+pub mod map_tree;
+pub mod serde_dump;
+
+pub use table::{TableIntoError, LimitedVec};
+
 use crate::string::Str;
 
-pub mod table;
+pub(crate) use self::table::{
+    TableArrayBuilder,
+    TableMapBuilder,
+    TableBuilder,
+};
 
-#[derive( Clone,
-    PartialEq, Eq, PartialOrd, Ord, Hash )]
+
+#[derive(
+    Clone,
+    PartialEq, Eq, PartialOrd, Ord, Hash,
+    Deserialize, Serialize,
+)]
 #[allow(clippy::exhaustive_enums)]
+#[serde(untagged)]
 pub enum Key {
     Index(i32),
     Name(Str),
@@ -117,11 +135,12 @@ impl std::fmt::Debug for Value {
     }
 }
 
-
 mod load {
 
 use crate::{
+    common::iexp2,
     string::Str,
+    table_iter::TableItem,
     load::{
         Error,
         KeyLoad, KeyBuilder as KeyBuilderTr,
@@ -130,7 +149,10 @@ use crate::{
     },
 };
 
-use super::{Key, Value, Table};
+use super::{
+    Key, Value,
+    table::load::TableLoadBuilder,
+};
 
 impl KeyLoad for Key {
     fn load_key<L: Loader>(loader: L) -> Result<Option<Self>, L::Error> {
@@ -159,7 +181,7 @@ impl Load for Value {
     }
 }
 
-struct Builder;
+pub struct Builder;
 
 impl BuilderTr for Builder {
     type Key = Key;
@@ -167,45 +189,74 @@ impl BuilderTr for Builder {
     type Output = Value;
 
     #[inline]
-    fn build_boolean<E: Error>(self, value: bool)
-    -> Result<Option<Value>, E>
-    {
+    fn build_boolean<E: Error>( self,
+        value: bool,
+    ) -> Result<Option<Value>, E> {
         Ok(Some(Value::Boolean(value)))
     }
 
     #[inline]
-    fn build_integer<E: Error>(self, value: i32)
-    -> Result<Option<Value>, E>
-    {
+    fn build_integer<E: Error>( self,
+        value: i32,
+    ) -> Result<Option<Value>, E> {
         Ok(Some(Value::Integer(value)))
     }
 
     #[inline]
-    fn build_float<E: Error>(self, value: f64)
-    -> Result<Option<Value>, E>
-    {
+    fn build_float<E: Error>( self,
+        value: f64,
+    ) -> Result<Option<Value>, E> {
         Ok(Some(Value::Float(value)))
     }
 
     #[inline]
-    fn build_string<E: Error>(self, value: &str)
-    -> Result<Option<Value>, E>
-    {
+    fn build_string<E: Error>( self,
+        value: &str,
+    ) -> Result<Option<Value>, E> {
         Ok(Some(Value::String(Str::from(value))))
     }
 
     fn build_table<T>(self, items: T) -> Result<Option<Value>, T::Error>
     where
-        T : TableLoader<Key=Self::Key, Value=Self::Value>,
+        T: TableLoader<Key=Self::Key, Value=Self::Value>,
         T::Error : Error
     {
-        Ok(Some(Value::Table(Table::load(items)?)))
+        let array_len = items.array_len();
+        let assoc_loglen = items.assoc_loglen();
+        let assoc_len = iexp2(assoc_loglen);
+        let mut table = TableLoadBuilder::<Value>::new(array_len, assoc_loglen);
+        table.set_assoc_last_free(items.assoc_last_free());
+        let mut array_index = 0;
+        let mut assoc_index = 0;
+        for item in items {
+            let item = item?;
+            match (item, array_index < array_len, assoc_index < assoc_len) {
+                (Some(TableItem::Array(value)), true, _) => {
+                    let index = array_index;
+                    array_index += 1;
+                    table.array_insert::<T::Error>(index, value)?;
+                },
+                (None, true, _) => array_index += 1,
+                (Some(TableItem::Array(_)), false, _) =>
+                    panic!("unexpected array item"),
+                (Some(TableItem::Assoc(assoc_item)), false, true) => {
+                    let index = assoc_index;
+                    assoc_index += 1;
+                    table.assoc_insert::<T::Error>(index, assoc_item)?;
+                },
+                (None, false, true) => assoc_index += 1,
+                (Some(TableItem::Assoc(_)), true, _) =>
+                    panic!("unexpected assoc item"),
+                (_, false, false) =>
+                    panic!("unexpected item"),
+            }
+        }
+        Ok(Some(Value::Table(table.build::<T::Error>()?)))
     }
 
 }
 
 }
-
 
 mod dump {
 
@@ -246,172 +297,31 @@ impl Dump for Value {
 
 }
 
+#[cfg(test)]
+pub(crate) mod test {
+    type Value = super::Value;
 
-mod de {
+    use crate::{test, dumper, loader};
 
-use serde::{Deserialize, de};
+    #[test]
+    fn test_1_load() {
+        let decompress = loader::decompress::decompress;
+        let decode = loader::decode_blueprint::<Value, Value>;
+        let encode = dumper::encode_blueprint::<Value, Value>;
+        let compress = dumper::compress::compress;
 
-use crate::{
-    string::Str,
-    serde::{
-        DeserializeOption, forward_de_to_de_option,
-    },
-};
-
-use super::{Key, Value};
-
-impl<'de> Deserialize<'de> for Key {
-    fn deserialize<D>(de: D) -> Result<Self, D::Error>
-    where D: serde::Deserializer<'de>
-    {
-        de.deserialize_any(KeyVisitor)
+        let exchange = test::EXCHANGE_BEHAVIOR_1_UNIT;
+        let encoded = decompress(exchange)
+            .unwrap();
+        let value = decode(encoded.clone())
+            .unwrap();
+        let reencoded = encode(value)
+            .unwrap();
+        assert_eq!(encoded, reencoded);
+        let reexchange = compress(reencoded.as_deref());
+        let revalue = decode(decompress(&reexchange).unwrap()).unwrap();
+        assert_eq!(reencoded, encode(revalue).unwrap());
     }
-}
-
-struct KeyVisitor;
-
-impl<'de> de::Visitor<'de> for KeyVisitor {
-    type Value = Key;
-
-    fn expecting(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(fmt, "an integer or a string")
-    }
-
-    crate::serde::delegate_to_i32!();
-
-    fn visit_i32<E>(self, v: i32) -> Result<Self::Value, E>
-    where E: de::Error
-    {
-        Ok(Key::Index(v))
-    }
-
-    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-    where E: de::Error
-    {
-        Ok(Key::from_maybe_known(v))
-    }
-
-}
-
-impl<'de> DeserializeOption<'de> for Value {
-    fn deserialize_option<D>(de: D) -> Result<Option<Self>, D::Error>
-    where D: serde::Deserializer<'de>
-    {
-        de.deserialize_any(ValueVisitor)
-    }
-}
-
-forward_de_to_de_option!(Value);
-
-struct ValueVisitor;
-
-impl<'de> de::Visitor<'de> for ValueVisitor {
-    type Value = Option<Value>;
-
-    fn expecting(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(fmt, "anything, really")
-    }
-
-    fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
-    where E: de::Error
-    {
-        Ok(Some(Value::Boolean(v)))
-    }
-
-    crate::serde::delegate_to_i32!();
-
-    fn visit_i32<E>(self, v: i32) -> Result<Self::Value, E>
-    where E: de::Error
-    {
-        Ok(Some(Value::Integer(v)))
-    }
-
-    crate::serde::delegate_to_f64!();
-
-    fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
-    where E: de::Error
-    {
-        Ok(Some(Value::Float(v)))
-    }
-
-    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-    where E: de::Error
-    {
-        Ok(Some(Value::String(Str::from(v))))
-    }
-
-    fn visit_none<E>(self) -> Result<Self::Value, E>
-    where E: de::Error
-    {
-        Ok(None)
-    }
-
-    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where D: de::Deserializer<'de>
-    {
-        deserializer.deserialize_any(self)
-    }
-
-    fn visit_unit<E>(self) -> Result<Self::Value, E>
-    where E: de::Error
-    {
-        Ok(Some(Value::Table(
-            super::table::de::TableVisitor::new().visit_unit()? )))
-    }
-
-    fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
-    where A: de::SeqAccess<'de>
-    {
-        Ok(Some(Value::Table(
-            super::table::de::TableVisitor::new().visit_seq(seq)? )))
-    }
-
-    fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
-    where A: de::MapAccess<'de>
-    {
-        Ok(Some(Value::Table(
-            super::table::de::TableVisitor::new().visit_map(map)? )))
-    }
-
-}
-
-}
-
-
-mod ser {
-
-use ::serde::{Serialize, ser};
-
-use crate::serde::impl_flat_se_option;
-
-use super::{Key, Value};
-
-impl Serialize for Key {
-    fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
-    where S: ser::Serializer
-    {
-        match self {
-            Self::Index(index) => index.serialize(ser),
-            Self::Name (name)  => name .serialize(ser),
-        }
-    }
-}
-
-impl Serialize for Value {
-    fn serialize<S>(&self, ser: S) -> Result<S::Ok, S::Error>
-    where S: ser::Serializer
-    {
-        match self {
-            Self::Boolean(value) => value.serialize(ser),
-            Self::Integer(value) => value.serialize(ser),
-            Self::Float  (value) => value.serialize(ser),
-            Self::String (value) => value.serialize(ser),
-            Self::Table  (table) => table.serialize(ser),
-        }
-    }
-}
-
-impl_flat_se_option!(Value);
 
 }
 

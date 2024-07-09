@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     error::{LoadError, DumpError},
     value::Value,
-    operand::OpValue,
+    operand::Value as OperandValue,
 };
 
 pub use crate::{
@@ -37,7 +37,7 @@ pub struct Blueprint {
 
     #[serde( default,
         skip_serializing_if="Vec::is_empty" )]
-    pub registers: Vec<Option<OpValue>>,
+    pub registers: Vec<Option<OperandValue>>,
 
     #[serde( default,
         skip_serializing_if="Vec::is_empty" )]
@@ -64,7 +64,7 @@ impl From<Blueprint> for Value {
 pub struct Component {
     item: String,
     index: i32,
-    registers: Vec<Option<OpValue>>,
+    registers: Vec<Option<OperandValue>>,
     behavior: Option<Behavior>,
 }
 

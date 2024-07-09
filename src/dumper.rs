@@ -30,7 +30,7 @@ where P: Dump, B: Dump
     fn dump<V: Dump>(value: Option<V>) -> Result<Vec<u8>, Error> {
         let mut dumper = Dumper::new(Vec::with_capacity(128));
         V::dump_option(value.as_ref(), &mut dumper)?;
-        Ok(dumper.finish())
+        Ok(dumper.end())
     }
     exchange.map(dump, dump).transpose()
 }
@@ -53,7 +53,7 @@ impl<W: Write<u8>> Dumper<W> {
         Self { writer }
     }
 
-    pub(super) fn finish(self) -> W {
+    pub(super) fn end(self) -> W {
         self.writer
     }
 

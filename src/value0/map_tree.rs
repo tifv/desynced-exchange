@@ -240,7 +240,7 @@ impl<'de> Visitor<'de> for TableVisitor {
     fn visit_unit<E>(self) -> Result<Self::Value, E>
     where E: serde::de::Error
     {
-        Ok(TableMapBuilder::new().finish())
+        Ok(TableMapBuilder::new().build())
     }
 
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
@@ -252,7 +252,7 @@ impl<'de> Visitor<'de> for TableVisitor {
             builder.insert(Key::Index(index), value);
             index += 1;
         }
-        Ok(builder.finish())
+        Ok(builder.build())
     }
 
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
@@ -262,7 +262,7 @@ impl<'de> Visitor<'de> for TableVisitor {
         while let Some((key, ValueOption(value))) = map.next_entry()? {
             builder.insert::<Key>(key, value);
         }
-        Ok(builder.finish())
+        Ok(builder.build())
     }
 
 }

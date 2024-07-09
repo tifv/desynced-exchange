@@ -124,11 +124,11 @@ function getDecodeStyle() {
 }
 
 /**
- * @returns {"struct" | "map_tree" | "table_dump"}
+ * @returns {"struct" | "map_tree"}
  */
 function getInterRepr() {
     let value = getInputValue("inter_repr");
-    if (!(value == "struct" || value == "map_tree" || value == "table_dump")) {
+    if (!(value == "struct" || value == "map_tree")) {
         throw new Error("unreachable");
     }
     return value;
