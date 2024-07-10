@@ -257,13 +257,13 @@ impl ser::Serializer for ValueSerializer {
     }
 
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
-        Ok(None)
+        self.serialize_none()
     }
 
     fn serialize_unit_struct(self, _name: &'static str)
     -> Result<Self::Ok, Self::Error>
     {
-        Ok(None)
+        self.serialize_unit()
     }
 
     fn serialize_unit_variant(

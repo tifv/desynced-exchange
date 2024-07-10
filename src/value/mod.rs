@@ -2,6 +2,7 @@ use crate::Str;
 
 mod table;
 pub use table::{ArrayBuilder, TableBuilder};
+pub(crate) use table::ArrayIntoIter;
 
 #[derive( Clone,
     PartialEq, Eq, PartialOrd, Ord, Hash )]
@@ -100,25 +101,6 @@ fn err_key_from_value() -> crate::error::DumpError {
         "only integers ans strings can serve as keys")
 }
 
-impl TryFrom<Value> for Key {
-    type Error = crate::error::DumpError;
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        Ok(match value {
-            Value::Integer(index) => Self::Index(index),
-            Value::String(string) => Self::Name(string),
-            Value::Boolean(_) | Value::Float(_) | Value::Table(_)
-                => return Err(err_key_from_value()),
-        })
-    }
-}
-
-impl TryFrom<Option<Value>> for Key {
-    type Error = crate::error::DumpError;
-    fn try_from(value: Option<Value>) -> Result<Self, Self::Error> {
-        Self::try_from(value.ok_or_else(err_key_from_value)?)
-    }
-}
-
 #[derive(Clone)]
 pub enum Value {
     Boolean(bool),
@@ -138,6 +120,36 @@ impl std::fmt::Debug for Value {
             Self::Float  (value) => value.fmt(f),
             Self::String (value) => value.fmt(f),
             Self::Table  (table) => table.fmt(f),
+        }
+    }
+}
+
+#[allow(clippy::use_self)]
+impl TryFrom<Value> for Key {
+    type Error = crate::error::DumpError;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        Ok(match value {
+            Value::Integer(number) => Key::Index(number),
+            Value::String(string) => Key::Name(string),
+            Value::Boolean(_) | Value::Float(_) | Value::Table(_)
+                => return Err(err_key_from_value()),
+        })
+    }
+}
+
+impl TryFrom<Option<Value>> for Key {
+    type Error = crate::error::DumpError;
+    fn try_from(value: Option<Value>) -> Result<Self, Self::Error> {
+        Self::try_from(value.ok_or_else(err_key_from_value)?)
+    }
+}
+
+#[allow(clippy::use_self)]
+impl From<Key> for Value {
+    fn from(value: Key) -> Self {
+        match value {
+            Key::Index(index) => Value::Integer(index),
+            Key::Name(name) => Value::String(name),
         }
     }
 }

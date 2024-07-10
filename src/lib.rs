@@ -264,6 +264,7 @@ pub mod value;
 
 pub mod blueprint;
 
+pub mod de;
 pub mod ser;
 
 mod test;
@@ -308,6 +309,12 @@ impl<V> Exchange<V> {
         match self {
             Self::Blueprint(value) => Exchange::Blueprint(f(value)),
             Self::Behavior (value) => Exchange::Behavior (f(value)),
+        }
+    }
+    pub fn unwrap(self) -> V {
+        match self {
+            Self::Blueprint(value) | Self::Behavior(value)
+                => value,
         }
     }
 }

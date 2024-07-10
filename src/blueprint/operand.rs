@@ -148,8 +148,7 @@ impl<'de> Deserialize<'de> for Operand {
     fn deserialize<D>(de: D) -> Result<Operand, D::Error>
     where D: de::Deserializer<'de>
     {
-        let visitor = OperandVisitor;
-        de.deserialize_enum("Operand", &[], visitor)
+        de.deserialize_enum("Operand", &[], OperandVisitor)
     }
 }
 
@@ -222,7 +221,7 @@ impl Serialize for Operand {
 }
 
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Jump {
     Return,
     Next,
@@ -266,6 +265,14 @@ impl From<Jump> for Option<_Value> {
             Jump::Next => None,
             Jump::Return => Some(_Value::Boolean(false)),
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for Jump {
+    fn deserialize<D>(de: D) -> Result<Self, D::Error>
+    where D: de::Deserializer<'de>
+    {
+        de.deserialize_enum("Jump", &[], JumpVisitor)
     }
 }
 

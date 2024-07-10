@@ -269,42 +269,95 @@ impl<V> IntoIterator for Table<V> {
     }
 }
 
-pub struct ClonedKeys<'s, V: 's, I>
+pub struct TupleRefIter<'s, A: 's, B: 's, I>
+where I: Iterator<Item=&'s (A, B)>,
+{
+    iter: I,
+}
+
+type TupleRefSliceIter<'s, V> =
+    TupleRefIter<'s, Key, V, std::slice::Iter<'s, (Key, V)>>;
+
+impl<'s, A: 's, B: 's, I> TupleRefIter<'s, A, B, I>
+where I: Iterator<Item=&'s (A, B)>,
+{
+    fn new<II>(iter: II) -> Self
+    where II: IntoIterator<IntoIter = I>
+    {
+        TupleRefIter { iter: iter.into_iter() }
+    }
+}
+
+impl<'s, A: 's, B: 's, I> Iterator for TupleRefIter<'s, A, B, I>
+where I: Iterator<Item=&'s (A, B)>,
+{
+    type Item = (&'s A, &'s B);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|(k, v)| (k, v))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+}
+
+impl<'s, A: 's, B: 's, I> ExactSizeIterator for TupleRefIter<'s, A, B, I>
+where I: ExactSizeIterator<Item=&'s (A, B)>
+{
+    #[inline]
+    fn len(&self) -> usize { self.iter.len() }
+}
+
+impl<'s, A: 's, B: 's, I> DoubleEndedIterator for TupleRefIter<'s, A, B, I>
+where I: DoubleEndedIterator<Item=&'s (A, B)>
+{
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.iter.next_back().map(|(k, v)| (k, v))
+    }
+}
+
+pub struct ClonedKeysIter<'s, V: 's, I>
 where I: Iterator<Item=&'s (Key, V)>,
 {
-    inner: I,
+    iter: I,
 }
 
-impl<'s, V: 's, I> ClonedKeys<'s, V, I>
+type ClonedKeysSliceIter<'s, V> =
+    ClonedKeysIter<'s, V, std::slice::Iter<'s, (Key, V)>>;
+
+impl<'s, V: 's, I> ClonedKeysIter<'s, V, I>
 where I: Iterator<Item=&'s (Key, V)>
 {
-    fn new(inner: I) -> Self { ClonedKeys { inner } }
+    fn new<II>(iter: II) -> Self
+    where II: IntoIterator<IntoIter = I>
+    {
+        ClonedKeysIter { iter: iter.into_iter() }
+    }
 }
 
-impl<'s, V: 's, I> Iterator for ClonedKeys<'s, V, I>
+impl<'s, V: 's, I> Iterator for ClonedKeysIter<'s, V, I>
 where I: Iterator<Item=&'s (Key, V)>
 {
     type Item = (Key, &'s V);
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|(k, v)| (k.clone(), v))
+        self.iter.next().map(|(k, v)| (k.clone(), v))
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
+        self.iter.size_hint()
     }
 }
 
-impl<'s, V: 's, I> ExactSizeIterator for ClonedKeys<'s, V, I>
+impl<'s, V: 's, I> ExactSizeIterator for ClonedKeysIter<'s, V, I>
 where I: ExactSizeIterator<Item=&'s (Key, V)>
 {
     #[inline]
-    fn len(&self) -> usize { self.inner.len() }
+    fn len(&self) -> usize { self.iter.len() }
 }
 
-impl<'s, V: 's, I> DoubleEndedIterator for ClonedKeys<'s, V, I>
+impl<'s, V: 's, I> DoubleEndedIterator for ClonedKeysIter<'s, V, I>
 where I: DoubleEndedIterator<Item=&'s (Key, V)>
 {
     fn next_back(&mut self) -> Option<Self::Item> {
-        self.inner.next_back().map(|(k, v)| (k.clone(), v))
+        self.iter.next_back().map(|(k, v)| (k.clone(), v))
     }
 }
 
@@ -320,7 +373,7 @@ fn add_size_hint(
     )
 }
 
-struct ChainIter<I, J>
+struct ChainIter<I, J = I>
 where
     I: Iterator,
     J: Iterator<Item=I::Item>,
@@ -329,14 +382,23 @@ where
     jter: Option<J>,
 }
 
+type ChainSliceIter<'s, V> = ChainIter<std::slice::Iter<'s, (Key, V)>>;
+
 impl<I, J> ChainIter<I, J>
 where
     I: Iterator,
     J: Iterator<Item=I::Item>,
 {
-    fn new(iter: I, jter: J) -> Self {
+    fn new<II, JJ>(iter: II, jter: JJ) -> Self
+    where
+        II: IntoIterator<IntoIter = I>,
+        JJ: IntoIterator<IntoIter = J>,
+    {
         #![allow(clippy::similar_names)]
-        Self { iter: Some(iter), jter: Some(jter) }
+        Self {
+            iter: Some(iter.into_iter()),
+            jter: Some(jter.into_iter()),
+        }
     }
 }
 
@@ -385,29 +447,106 @@ where
 
 impl<V> Table<V> {
     #[must_use]
-    pub fn iter(&self) -> impl ExactSizeIterator<Item=(Key, &'_ V)> {
+    pub fn iter(&self) -> ClonedKeysSliceIter<'_, V> {
         <&Self as IntoIterator>::into_iter(self)
     }
 }
 
 impl<'s, V> IntoIterator for &'s Table<V> {
     type Item = (Key, &'s V);
-    type IntoIter = ClonedKeys<'s, V, std::slice::Iter<'s, (Key, V)>>;
+    type IntoIter = ClonedKeysSliceIter<'s, V>;
     fn into_iter(self) -> Self::IntoIter {
-        ClonedKeys::new(self.items.iter())
+        ClonedKeysIter::new(self.items.iter())
     }
 }
 
-struct ArrayIter<'s, V> {
+pub(crate) struct ArrayIter<K, V, I>
+where
+    K: std::borrow::Borrow<Key>,
+    I: Iterator<Item=(K, V)>
+{
     keys: Range<i32>,
-    items: &'s [(Key, V)],
+    iter: std::iter::Peekable<I>,
+}
+
+pub(crate) type ArrayIntoIter<V> =
+    ArrayIter<Key, V, std::vec::IntoIter<(Key, V)>>;
+pub(crate) type ArrayRefIter<'s, V> =
+    ArrayIter<&'s Key, &'s V, TupleRefSliceIter<'s, V>>;
+
+impl<K, V, I> ArrayIter<K, V, I>
+where
+    K: std::borrow::Borrow<Key>,
+    I: Iterator<Item=(K, V)>
+{
+    fn new<II>(keys: Range<i32>, iter: II) -> Self
+    where II: IntoIterator<IntoIter = I>
+    {
+        Self { keys, iter: iter.into_iter().peekable() }
+    }
+}
+
+impl<K, V, I> Iterator for ArrayIter<K, V, I>
+where
+    K: std::borrow::Borrow<Key>,
+    I: Iterator<Item=(K, V)>
+{
+    type Item = Option<V>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let key = self.keys.next()?;
+        let Some((next_key, _)) = self.iter.peek() else {
+            return Some(None);
+        };
+        let next_key = match next_key.borrow() {
+            &Key::Index(next_key) if next_key > 0 => next_key,
+            _ => panic!("key is not a positive integer"),
+        };
+        if next_key > key {
+            return Some(None);
+        }
+        assert!(next_key == key);
+        let Some((_, value)) = self.iter.next() else {
+            unreachable!();
+        };
+        Some(Some(value))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.keys.size_hint()
+    }
+}
+
+impl<K, V, I> ExactSizeIterator for ArrayIter<K, V, I>
+where
+    K: std::borrow::Borrow<Key>,
+    I: Iterator<Item=(K, V)>
+{
+    fn len(&self) -> usize {
+        self.keys.len()
+    }
 }
 
 impl<V> Table<V> {
+    pub(crate) fn into_array_iter(self)
+    -> ArrayIntoIter<V>
+    {
+        let array_items = &self.items[self.indices.clone()];
+        let array_keys = 1 .. array_items.last()
+            .map_or(1, |(k, _)| 1 + k.as_index().unwrap());
+        let len = self.items.len();
+        let indices = self.indices;
+        let mut iter = self.items.into_iter();
+        if indices.start > 0 {
+            assert!(iter.nth(indices.start - 1).is_some());
+        }
+        if indices.end < len {
+            assert!(iter.nth(len - indices.end - 1).is_some());
+        }
+        ArrayIter::new(array_keys, iter)
+    }
     /// Split the map into array and assoc parts
     fn array_assoc_iter(&self) -> (
-        impl ExactSizeIterator<Item=Option<&'_ V>>,
-        impl ExactSizeIterator<Item=(Key, &'_ V)>,
+        ArrayRefIter<'_, V>,
+        ClonedKeysIter<'_, V, ChainSliceIter<'_, V>>,
     ) {
         let mut indices = self.indices.clone();
         loop {
@@ -426,43 +565,12 @@ impl<V> Table<V> {
         let array_keys = 1 .. array_items.last()
             .map_or(1, |(k, _)| 1 + k.as_index().unwrap());
         (
-            ArrayIter { keys: array_keys, items: array_items },
-            ClonedKeys::new(ChainIter::new(
+            ArrayIter::new(array_keys, TupleRefIter::new(array_items)),
+            ClonedKeysIter::new(ChainIter::new(
                 self.items[..indices.start].iter(),
                 self.items[indices.end..].iter()
             ))
         )
-    }
-}
-
-impl<'s, V> Iterator for ArrayIter<'s, V> {
-    type Item = Option<&'s V>;
-    fn next(&mut self) -> Option<Self::Item> {
-        let key = self.keys.next()?;
-        let Some((next_key, _)) = self.items.first() else {
-            return Some(None);
-        };
-        let &Key::Index(next_key) = next_key else {
-            unreachable!()
-        };
-        if next_key > key {
-            return Some(None);
-        }
-        assert!(next_key == key);
-        let Some(((_, value), rest)) = self.items.split_first() else {
-            unreachable!()
-        };
-        self.items = rest;
-        Some(Some(value))
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.keys.size_hint()
-    }
-}
-
-impl<'s, V> ExactSizeIterator for ArrayIter<'s, V> {
-    fn len(&self) -> usize {
-        self.keys.len()
     }
 }
 
