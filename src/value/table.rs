@@ -466,7 +466,7 @@ impl<'s, V> IntoIterator for &'s Table<V> {
     }
 }
 
-pub(crate) struct ArrayIter<K, V, I>
+pub struct ArrayIter<K, V, I>
 where
     K: std::borrow::Borrow<Key>,
     I: Iterator<Item=(K, V)>
@@ -532,7 +532,7 @@ where
 }
 
 impl<V> Table<V> {
-    pub(crate) fn into_array_iter(self)
+    pub fn into_array_iter(self)
     -> ArrayIntoIter<V>
     {
         let array_items = &self.items[self.indices.clone()];

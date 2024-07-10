@@ -1,6 +1,10 @@
 use std::rc::Rc;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, de, Serialize};
+
+use crate::common::serde::DeserializeOption;
+
+use super::serde::impl_flat_se_option;
 
 pub type SharedStr = Rc<str>;
 
@@ -8,6 +12,12 @@ pub type SharedStr = Rc<str>;
 pub enum Str {
     Static(&'static str),
     Shared(SharedStr),
+}
+
+impl std::fmt::Debug for Str {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        <str as std::fmt::Debug>::fmt(self, f)
+    }
 }
 
 impl std::ops::Deref for Str {
@@ -57,9 +67,9 @@ impl Str {
     }
 }
 
-impl std::fmt::Debug for Str {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        <str as std::fmt::Debug>::fmt(self, f)
+impl Default for Str {
+    fn default() -> Self {
+        Self::Static(<&str>::default())
     }
 }
 
@@ -109,5 +119,83 @@ impl Serialize for Str {
     {
         ser.serialize_str(self)
     }
+}
+
+impl<'de> DeserializeOption<'de> for Str {
+    fn deserialize_option<D>(de: D)
+    -> Result<Option<Self>, D::Error>
+    where D: serde::Deserializer<'de>
+    {
+        de.deserialize_any(StrVisitor)
+    }
+}
+
+struct StrVisitor;
+
+impl<'de> de::Visitor<'de> for StrVisitor {
+    type Value = Option<Str>;
+    fn expecting(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(fmt, "an optional string")
+    }
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where E: de::Error
+    {
+        Ok(Some(Str::from(v)))
+    }
+    fn visit_some<D>(self, de: D) -> Result<Self::Value, D::Error>
+    where D: de::Deserializer<'de>
+    {
+        de.deserialize_any(self)
+    }
+    fn visit_none<E>(self) -> Result<Self::Value, E>
+    where E: de::Error
+    {
+        Ok(None)
+    }
+    fn visit_unit<E>(self) -> Result<Self::Value, E>
+    where E: de::Error
+    {
+        self.visit_none()
+    }
+}
+
+impl_flat_se_option!(Str);
+
+#[cfg(test)]
+mod test {
+
+use crate::common::{
+    serde::OptionSerdeWrap,
+    TransparentRef as _,
+};
+
+use super::Str;
+
+#[test]
+fn str_option_flat_serde_ron() {
+    for (s, s1) in [
+        (r#"None"#  , None),
+        (r#""asdf""#, Some("asdf")),
+        (r#""as\"df""#, Some("as\"df")),
+    ] {
+        let s: Option<Str> = OptionSerdeWrap::into_inner(
+            ron::from_str(s).unwrap() );
+        assert_eq!(s.as_deref(), s1);
+    }
+}
+
+#[test]
+fn str_option_flat_serde_json() {
+    for (s, s1) in [
+        (r#"null"#  , None),
+        (r#""asdf""#, Some("asdf")),
+        (r#""as\"df""#, Some("as\"df")),
+    ] {
+        let s: Option<Str> = OptionSerdeWrap::into_inner(
+            serde_json::from_str(s).unwrap() );
+        assert_eq!(s.as_deref(), s1);
+    }
+}
+
 }
 

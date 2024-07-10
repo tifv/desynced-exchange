@@ -15,7 +15,7 @@ use crate::{
     value::{Key, Value, Table, ArrayBuilder as TableArrayBuilder},
 };
 
-use super::instruction::Instruction;
+use super::Instruction;
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Behavior {
@@ -113,32 +113,32 @@ impl BehaviorBuilder {
     fn err_unexpected_key(key: Key) -> LoadError { LoadError::from(format!(
         "behavior representation should not have {key:?} key" )) }
 
-    fn set_name(&mut self, name: Value) -> Result<(), LoadError> {
-        let Value::String(name) = name else {
+    fn set_name(&mut self, value: Value) -> Result<(), LoadError> {
+        let Value::String(value) = value else {
             return Err(LoadError::from(
                 "behavor's name should be a string" ));
         };
-        self.name = Some(name); Ok(())
+        self.name = Some(value); Ok(())
     }
 
-    fn set_description(&mut self, description: Value) -> Result<(), LoadError> {
-        let Value::String(description) = description else {
+    fn set_description(&mut self, value: Value) -> Result<(), LoadError> {
+        let Value::String(value) = value else {
             return Err(LoadError::from(
                 "behavor's description should be a string" ));
         };
-        self.description = Some(description); Ok(())
+        self.description = Some(value); Ok(())
     }
 
-    fn set_parameters(&mut self, parameters: Value) -> Result<(), LoadError> {
-        let Value::Table(parameters) = parameters else {
+    fn set_parameters(&mut self, value: Value) -> Result<(), LoadError> {
+        let Value::Table(table) = value else {
             return Err(Self::err_parameters());
         };
-        for value in parameters.into_continuous_iter() {
-            let value = value.map_err(|_error| Self::err_parameters())?;
-            let Value::Boolean(value) = value else {
+        for item in table.into_continuous_iter() {
+            let item = item.map_err(|_error| Self::err_parameters())?;
+            let Value::Boolean(is_output) = item else {
                 return Err(Self::err_parameters());
             };
-            self.parameters.push(Parameter { is_output: value, name: None });
+            self.parameters.push(Parameter { is_output, name: None });
         }
         Ok(())
     }
@@ -146,12 +146,12 @@ impl BehaviorBuilder {
         "behavior's parameters should be \
          a continuous array of booleans" ) }
 
-    fn set_parameter_names(&mut self, parameter_names: Value)
+    fn set_parameter_names(&mut self, value: Value)
     -> Result<(), LoadError> {
-        let Value::Table(parameter_names) = parameter_names else {
+        let Value::Table(table) = value else {
             return Err(Self::err_param_names());
         };
-        self.parameter_names = Some(parameter_names);
+        self.parameter_names = Some(table);
         Ok(())
     }
 
@@ -183,14 +183,14 @@ impl BehaviorBuilder {
         "behavior's parameter names should be \
          an array of strings or nils" ) }
 
-    fn set_subroutines(&mut self, subroutines: Value)
+    fn set_subroutines(&mut self, value: Value)
     -> Result<(), LoadError> {
-        let Value::Table(subroutines) = subroutines else {
+        let Value::Table(table) = value else {
             return Err(Self::err_subroutines());
         };
-        for value in subroutines.into_continuous_iter() {
-            let value = value.map_err(|_error| Self::err_subroutines())?;
-            self.subroutines.push(Behavior::try_from(value)?);
+        for item in table.into_continuous_iter() {
+            let item = item.map_err(|_error| Self::err_subroutines())?;
+            self.subroutines.push(Behavior::try_from(item)?);
         }
         Ok(())
     }

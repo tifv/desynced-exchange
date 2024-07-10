@@ -188,11 +188,11 @@
 // #![allow(clippy::needless_pass_by_value)]
 
 // LINTS: production
-#![warn(clippy::todo)]
-#![warn(clippy::unimplemented)]
-#![warn(clippy::dbg_macro)]
-#![warn(clippy::exhaustive_enums)]
-#![warn(clippy::exhaustive_structs)]
+// #![warn(clippy::todo)]
+// #![warn(clippy::unimplemented)]
+// #![warn(clippy::dbg_macro)]
+// #![warn(clippy::exhaustive_enums)]
+// #![warn(clippy::exhaustive_structs)]
 
 use ::serde::{Deserialize, Serialize};
 

@@ -13,7 +13,7 @@ use crate::{
     value::{Key, Value, Table, ArrayBuilder as TableArrayBuilder},
 };
 
-use super::operand::{Operand, Jump};
+use super::{Operand, Jump};
 
 #[derive(Debug, Clone)]
 pub struct Instruction {
@@ -62,12 +62,19 @@ impl InstructionBuilder {
         // of arguments, and all of them can be None. But if
         // we do not limit the number of arguments somehow, we can be
         // tricked out of memory by a very large index.
-        let max_index = i32::try_from(table.len() * 2 + 256)
-            .unwrap_or(i32::MAX);
+        let max_index = i32::try_from(
+            table.len().saturating_mul(2).saturating_add(256)
+        ).unwrap_or(i32::MAX);
         for (key, value) in table {
             match key {
-                Key::Index(index) if (1 ..= max_index).contains(&index)
-                => {
+                Key::Index(index) if index > max_index => {
+                    return Err(LoadError::from(
+                        "unrealistically large number \
+                         of instruction arguments" ))
+                },
+                Key::Index(index) if index < 1 =>
+                    return Err(Self::err_unexpected_key(key)),
+                Key::Index(index) => {
                     let Ok(index) = usize::try_from(index - 1)
                         else { unreachable!(); };
                     if array.len() <= index {
@@ -75,10 +82,6 @@ impl InstructionBuilder {
                     }
                     array[index] = Some(value);
                 },
-                Key::Index(index) if index <= 0 =>
-                    return Err(Self::err_unexpected_key(key)),
-                Key::Index(index) =>
-                    return Err(Self::err_non_continuous(index)),
                 Key::Name(name) => match name.as_ref() {
                     "op"   => this.set_operation (value)?,
                     "next" => this.set_next      (value)?,
@@ -99,11 +102,6 @@ impl InstructionBuilder {
         }
         this.build()
     }
-
-    fn err_non_continuous(index: i32) -> LoadError { LoadError::from(format!(
-        "instruction representation should have \
-         argument indices in a range `1..N` (for a resonable N), \
-         not {index:?}" )) }
 
     fn err_unexpected_key(key: Key) -> LoadError { LoadError::from(format!(
         "instruction representation should not have {key:?} key" )) }

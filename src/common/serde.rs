@@ -365,6 +365,13 @@ pub(crate) mod option_some {
         Deserialize, Deserializer,
     };
 
+    pub(crate) fn deserialize<'de, T, D>(de: D)
+    -> Result<Option<T>, D::Error>
+    where T: Deserialize<'de>, D: Deserializer<'de>
+    {
+        T::deserialize(de).map(Some)
+    }
+
     pub(crate) fn serialize<T, S>(value: &Option<T>, ser: S)
     -> Result<S::Ok, S::Error>
     where T: Serialize, S: Serializer
@@ -375,11 +382,52 @@ pub(crate) mod option_some {
         }
     }
 
+}
+
+pub(crate) mod vec_option_wrap {
+    use std::marker::PhantomData;
+
+    use serde::{de::Visitor, Deserializer, Serializer};
+
+    use crate::common::TransparentRef;
+
+    use super::{
+        DeserializeOption, SerializeOption,
+        OptionSerdeWrap,
+    };
+
     pub(crate) fn deserialize<'de, T, D>(de: D)
-    -> Result<Option<T>, D::Error>
-    where T: Deserialize<'de>, D: Deserializer<'de>
+    -> Result<Vec<Option<T>>, D::Error>
+    where T: DeserializeOption<'de>, D: Deserializer<'de>
     {
-        T::deserialize(de).map(Some)
+        de.deserialize_seq(VecOptionVisitor(PhantomData))
+    }
+
+    struct VecOptionVisitor<T>(PhantomData<T>);
+
+    impl<'de, T> Visitor<'de> for VecOptionVisitor<T>
+    where T: DeserializeOption<'de>
+    {
+        type Value = Vec<Option<T>>;
+        fn expecting(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+            write!(fmt, "a sequence of options")
+        }
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where A: serde::de::SeqAccess<'de>
+        {
+            let mut value = Vec::new();
+            while let Some(item) = seq.next_element()? {
+                value.push(OptionSerdeWrap::into_inner(item));
+            }
+            Ok(value)
+        }
+    }
+
+    pub(crate) fn serialize<T, S>(value: &[Option<T>], ser: S)
+    -> Result<S::Ok, S::Error>
+    where T: SerializeOption, S: Serializer
+    {
+        ser.collect_seq(value.iter().map(OptionSerdeWrap::from_ref))
     }
 
 }
