@@ -121,9 +121,13 @@ impl<W: Write<u8>> Dumper<W> {
             (len @ 0 ..= 0xF, None) => {
                 self.write_byte(0x90 | (len as u8));
             },
-            (len @ 0x_0010 ..= 0x_FFFF, None) => {
+            (len @ 0 ..= 0x_FFFF, None) => {
                 self.write_byte(0xDC);
                 self.write_array::<2>((len as u16).to_le_bytes());
+            },
+            (len, None) => {
+                self.write_byte(0xDD);
+                self.write_array::<4>(len.to_le_bytes());
             },
             (len @ 0 ..= 0x001F_FFFF, Some(logsize @ 0 ..= 7)) => {
                 let has_array = len > 0;
@@ -143,7 +147,6 @@ impl<W: Write<u8>> Dumper<W> {
                 }
                 self.write_ext_uint(table.assoc_last_free());
             },
-            (0x0001_0000 ..= u32::MAX, None) |
             (0x0020_0000 ..= u32::MAX, Some(_)) |
             (_, Some(self::EXCEEDED_LOGLEN ..= LogSize::MAX)) =>
                 return Err(Error::from("unsupported table size")),

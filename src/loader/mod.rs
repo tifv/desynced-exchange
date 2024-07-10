@@ -223,6 +223,9 @@ impl<R: Read<u8>> Loader<R> {
             0xDC => TableHeader::array(
                 u16::from_le_bytes(self.read_array::<2>()?) as u32,
             ),
+            0xDD => TableHeader::array(
+                u32::from_le_bytes(self.read_array::<4>()?),
+            ),
             0x80 ..= 0x8F => {
                 let has_array_part = head & 0x01 > 0;
                 let array_len = if has_array_part {
