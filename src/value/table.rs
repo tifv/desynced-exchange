@@ -6,11 +6,17 @@ use super::Key;
 
 mod assoc;
 
-#[derive(Clone, )]
+#[derive(Clone)]
 pub struct Table<V> {
     items: Vec<(Key, V)>,
     // the range of positive integer keys
     indices: Range<usize>,
+}
+
+impl<V: PartialEq> PartialEq for Table<V> {
+    fn eq(&self, other: &Self) -> bool {
+        self.items == other.items
+    }
 }
 
 impl<V: std::fmt::Debug> std::fmt::Debug for Table<V> {

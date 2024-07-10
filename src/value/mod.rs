@@ -101,7 +101,7 @@ fn err_key_from_value() -> crate::error::DumpError {
         "only integers ans strings can serve as keys")
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum Value {
     Boolean(bool),
     Integer(i32),
@@ -449,6 +449,29 @@ impl Serialize for Value {
 }
 
 common_serde::impl_flat_se_option!(Value);
+
+}
+
+
+#[cfg(test)]
+mod test {
+
+use crate::common::{
+    TransparentRef,
+    serde::{OptionSerdeWrap, OptionRefSerdeWrap},
+};
+
+use super::Value;
+
+#[test]
+fn test_value_serde() {
+    let value: Option<Value> =
+        ron::from_str::<OptionSerdeWrap<_>>(crate::test::RON_VALUE_1)
+        .unwrap().into_inner();
+    let ron_again = ron::to_string(
+        OptionRefSerdeWrap::from_ref(&value.as_ref()) ).unwrap();
+    assert_eq!(ron_again.as_str(), crate::test::RON_VALUE_1_COMPACT);
+}
 
 }
 

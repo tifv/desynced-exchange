@@ -80,3 +80,32 @@ pub(crate) const EXCHANGE_BEHAVIOR_4_SUB: &str = "\
     Hxvbh2TXeff0jq\
 ";
 
+pub(crate) const RON_VALUE_1: &str = r#"{
+    "bool1"  : true ,
+    "bool2"  : false,
+    "int1"   :   42,
+    "int2"   :  -42,
+    "int3"   :    0,
+    "float1" :  42.0,
+    "float2" : -42.0,
+    "float3" :   0.0,
+    "string" : "string",
+    "array" : [1, 2, 3, 4],
+    "array_but_different" : {1: 1, 2: 2, 3: 3, 4: {}, 5: {}},
+    "map" : {"key" : "value"},
+    "mixed_table" : {1: 42, -1: -42, 0: 0, "key" : "value"},
+}"#;
+
+pub(crate) const RON_VALUE_1_COMPACT: &str = const_format::concatcp!(
+    "{",
+    r#""array":[1,2,3,4],"#,
+    r#""array_but_different":[1,2,3,{},{}],"#,
+    r#""bool1":true,"bool2":false,"#,
+    r#""float1":42.0,"float2":-42.0,"float3":0.0,"#,
+    r#""int1":42,"int2":-42,"int3":0,"#,
+    r#""map":{"key":"value"},"#,
+    r#""mixed_table":{-1:-42,0:0,1:42,"key":"value"},"#,
+    r#""string":"string""#,
+    "}"
+);
+

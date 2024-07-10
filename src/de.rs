@@ -546,3 +546,28 @@ impl<'de> de::EnumAccess<'de> for TableEnumDeserializer {
     }
 }
 
+#[cfg(test)]
+mod test {
+
+use serde::Deserialize;
+
+use crate::common::{
+    TransparentRef,
+    serde::OptionSerdeWrap,
+};
+
+use super::{Value, ValueDeserializer};
+
+#[test]
+fn test_value_de() {
+    let value1: Option<Value> =
+        ron::from_str::<OptionSerdeWrap<_>>(crate::test::RON_VALUE_1)
+        .unwrap().into_inner();
+    let value2 = Option::<Value>::deserialize(
+        ValueDeserializer::new(value1.clone())
+    ).unwrap();
+    assert_eq!(value1, value2);
+}
+
+}
+

@@ -566,3 +566,26 @@ impl<F: ValueFinisher> ser::SerializeStructVariant for TableSerializer<F> {
     }
 }
 
+#[cfg(test)]
+mod test {
+
+use serde::Serialize;
+
+use crate::common::{
+    TransparentRef,
+    serde::OptionSerdeWrap,
+};
+
+use super::{Value, ValueSerializer};
+
+#[test]
+fn test_value_ser() {
+    let value1: Option<Value> =
+        ron::from_str::<OptionSerdeWrap<_>>(crate::test::RON_VALUE_1)
+        .unwrap().into_inner();
+    let value2 = value1.serialize(ValueSerializer::new()).unwrap();
+    assert_eq!(value1, value2);
+}
+
+}
+

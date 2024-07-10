@@ -9,6 +9,7 @@ flate2 = "=1.*"
 serde = { version = "=1.*", features = ["derive"]}
 
 [dev-dependencies]
+const_format = "=0.2.*"
 ron = { version = "=0.8.*" }
 serde_json = { version = "=1.*" }
 
