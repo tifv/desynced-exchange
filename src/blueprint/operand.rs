@@ -429,13 +429,12 @@ impl SerializeOption for Place {
 }
 
 
-#[repr(i32)]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Register {
-    Signal = -4,
-    Visual = -3,
-    Store  = -2,
-    Goto   = -1,
+    Goto,
+    Store,
+    Visual,
+    Signal,
 }
 
 impl TryFrom<_Value> for Register {
@@ -453,21 +452,28 @@ impl TryFrom<i32> for Register {
     type Error = LoadError;
     #[inline]
     fn try_from(value: i32) -> Result<Register, Self::Error> {
+        use Register::{Goto, Store, Visual, Signal};
         Ok(match value {
-            -4 => Register::Signal,
-            -3 => Register::Visual,
-            -2 => Register::Store,
-            -1 => Register::Goto,
+            -1 => Goto,
+            -2 => Store,
+            -3 => Visual,
+            -4 => Signal,
             _ => return Err(LoadError::from(
                 "register should be encoded by a negative integer \
-                 in `-4 .. -1` range" )),
+                 in `-4 ..= -1` range" )),
         })
     }
 }
 
 impl From<Register> for _Value {
     fn from(this: Register) -> _Value {
-        _Value::Integer(this as i32)
+        use Register::{Goto, Store, Visual, Signal};
+        _Value::Integer(match this {
+            Goto   => -1,
+            Store  => -2,
+            Visual => -3,
+            Signal => -4,
+        })
     }
 }
 
