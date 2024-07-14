@@ -31,6 +31,7 @@ fn bool_true() -> bool { true }
 fn bool_is_true(&b: &bool) -> bool { b }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct Blueprint {
 
     #[serde( default,
@@ -295,7 +296,6 @@ impl BlueprintBuilder {
                 }
             }
         }
-        // XXX try to fill registers into components ?
         Ok(Blueprint {
             name,
             frame,
@@ -365,6 +365,7 @@ impl From<Blueprint> for _Value {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct Component {
 
     pub item: Str,

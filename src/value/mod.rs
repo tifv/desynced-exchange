@@ -69,19 +69,23 @@ fn find_known_name(name: &str) -> Option<&'static str> {
         "cmt", "nx", "ny",
         "c", "txt", "sub",
 
-        // logistics
-        "carrier", "requester", "supplier",
-        "channel_1", "channel_2", "channel_3", "channel_4",
-        "high_priority", "crane_only",
-        "transport_route",
-
         // behavior
         "name", "desc",
         "parameters", "pnames",
         "subs",
 
-        // XXX blueprint
-    )
+        // blueprint
+        // "name" (duplicate)
+        "frame", "powered_down", "disconnected", "logistics",
+        "components", "regs", "links",
+        "locks",
+
+        // logistics
+        "carrier", "requester", "supplier",
+        "channel_1", "channel_2", "channel_3", "channel_4",
+        "high_priority", "crane_only",
+        "transport_route",
+)
 }
 
 impl From<&'static str> for Key {
@@ -102,6 +106,7 @@ fn err_key_from_value() -> crate::error::DumpError {
 }
 
 #[derive(Clone, PartialEq)]
+#[allow(clippy::exhaustive_enums)]
 pub enum Value {
     Boolean(bool),
     Integer(i32),

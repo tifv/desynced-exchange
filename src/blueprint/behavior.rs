@@ -18,6 +18,7 @@ use crate::{
 use super::Instruction;
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct Behavior {
 
     #[serde( default,
@@ -41,6 +42,7 @@ pub struct Behavior {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct Parameter {
     #[serde( default,
         skip_serializing_if="Option::is_none",

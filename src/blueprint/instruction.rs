@@ -16,6 +16,7 @@ use crate::{
 use super::{Operand, Jump};
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Instruction {
     pub operation: Str,
     pub args: Vec<Operand>,

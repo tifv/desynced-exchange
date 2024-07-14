@@ -9,6 +9,7 @@ use super::serde::impl_flat_se_option;
 pub type SharedStr = Rc<str>;
 
 #[derive(Clone)]
+#[non_exhaustive]
 pub enum Str {
     Static(&'static str),
     Shared(SharedStr),

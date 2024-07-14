@@ -29,6 +29,7 @@ trait EnumTryVisitor<'de> : de::Visitor<'de> {
 
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum Operand {
 
     // this can indicate either `Jump::Next` or a lack of value/place,
@@ -222,6 +223,7 @@ impl Serialize for Operand {
 
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 pub enum Jump {
     Return,
     Next,
@@ -317,6 +319,7 @@ impl<'de> de::Visitor<'de> for JumpVisitor {
 
 /// Place arguments to instructions
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 pub enum Place {
     Parameter(i32),
     Register(Register),
@@ -480,6 +483,7 @@ impl From<Register> for _Value {
 
 /// Value arguments to operations
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 pub enum Value {
     Number(i32),
     Item(Str),

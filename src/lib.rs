@@ -188,11 +188,11 @@
 // #![allow(clippy::needless_pass_by_value)]
 
 // LINTS: production
-// #![warn(clippy::todo)]
-// #![warn(clippy::unimplemented)]
-// #![warn(clippy::dbg_macro)]
-// #![warn(clippy::exhaustive_enums)]
-// #![warn(clippy::exhaustive_structs)]
+#![warn(clippy::todo)]
+#![warn(clippy::unimplemented)]
+#![warn(clippy::dbg_macro)]
+#![warn(clippy::exhaustive_enums)]
+#![warn(clippy::exhaustive_structs)]
 
 use ::serde::{Deserialize, Serialize};
 
@@ -220,6 +220,7 @@ mod test;
 const MAX_ASSOC_LOGLEN: u8 = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[allow(clippy::exhaustive_enums)]
 pub enum Exchange<Blueprint, Behavior = Blueprint> {
     Blueprint(Blueprint),
     Behavior(Behavior),
