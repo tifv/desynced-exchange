@@ -21,6 +21,22 @@
         fieldset > label {
             display: block;
         }
+        .note {
+            font-size: smaller;
+        }
+        .spoiler .spoiler--heading {
+            cursor: pointer;
+        }
+        .spoiler .spoiler--heading::after {
+            margin-inline-start: 0.5ex;
+            content: "⮟";
+        }
+        .spoiler.spoiler__hidden .spoiler--heading::after {
+            content: "⮜";
+        }
+        .spoiler.spoiler__hidden .spoiler--inner {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -45,8 +61,20 @@
             <button data-action="cv_to_encoded"
                 hidden data-show_state="decoded"
                >Encode</button>
+            <div class="note">(also Ctrl+Enter)</div>
         </div>
-        <div class="spoiler settings">
+        <div class="spoiler spoiler__hidden">
+            <label class="spoiler--heading">Disclaimer</label>
+            <div class="spoiler--inner">
+                This project is designed to manipulate blueprint strings created by
+                the Desynced game.
+                The author of the project is not connected to the developers
+                or publishers of the game at all.
+                There are no guarantees that this project is, or will be, useful
+                for any purpose whatsoever.
+            </div>
+        </div>
+        <div class="spoiler spoiler__hidden settings">
             <label class="spoiler--heading">Settings</label>
             <div class="spoiler--inner input_container input_container__block">
                 <fieldset>
@@ -96,5 +124,14 @@
         </div>
     </div>
 </body>
+<script>
+    document.querySelectorAll(".spoiler").forEach(
+        (spoiler) => spoiler.querySelectorAll(".spoiler--heading").forEach(
+            (label) => label.addEventListener('click', () => {
+                spoiler.classList.toggle("spoiler__hidden");
+            })
+        )
+    );
+</script>
 <script type="module" src="./main.js"></script>
 </html>

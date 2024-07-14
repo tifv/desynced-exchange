@@ -151,11 +151,16 @@ async function main() {
                     .forEach((el) => el.innerHTML = "");
                 if (value !== undefined) {
                     section.querySelectorAll('textarea')
-                    .forEach((el) => el.value = value);
+                        .forEach((el) => el.value = value);
                 }
                 document
                     .querySelectorAll("[data-show_state=" + state + "]")
                     .forEach((el) => el.removeAttribute('hidden'));
+                section.querySelectorAll('textarea')
+                    .forEach((el) => {
+                        el.setSelectionRange(0, 0);
+                        el.focus();
+                    });
             },
             exit() {
                 document
@@ -185,11 +190,14 @@ async function main() {
         }
         state.switchState(() => {
             try {
-                return {value: desynced_lib.decode(input.value, {
-                    decodeFormat: getDecodeFormat(),
-                    decodeStyle: getDecodeStyle(),
-                    interRepr: getInterRepr(),
-                })}
+                return {value: desynced_lib.decode(
+                    input.value.trim(),
+                    {
+                        decodeFormat: getDecodeFormat(),
+                        decodeStyle: getDecodeStyle(),
+                        interRepr: getInterRepr(),
+                    },
+                )};
             } catch (error) {
                 let errors = input_pane.querySelector('.errors');
                 if (errors == null) {
@@ -211,10 +219,13 @@ async function main() {
         }
         state.switchState(() => {
             try {
-                return {value: desynced_lib.encode(input.value, {
-                    decodeFormat: getDecodeFormat(),
-                    interRepr: getInterRepr(),
-                })}
+                return {value: desynced_lib.encode(
+                    input.value.trim(),
+                    {
+                        decodeFormat: getDecodeFormat(),
+                        interRepr: getInterRepr(),
+                    },
+                )};
             } catch (error) {
                 let errors = input_pane.querySelector('.errors');
                 if (errors == null) {
@@ -240,8 +251,24 @@ async function main() {
     document.querySelectorAll("button[data-action=cv_to_decoded]").forEach(
         (button) => button.addEventListener('click', decode)
     );
+    document.querySelectorAll("#pane__encoded > textarea").forEach(
+        (button) => /** @type {HTMLElement} */ (button)
+            .addEventListener('keydown', (event) => {
+                if (event.key == "Enter" && event.ctrlKey) {
+                    decode();
+                }
+            })
+    );
     document.querySelectorAll("button[data-action=cv_to_encoded]").forEach(
         (button) => button.addEventListener('click', encode)
+    );
+    document.querySelectorAll("#pane__decoded > textarea").forEach(
+        (button) => /** @type {HTMLElement} */ (button)
+            .addEventListener('keydown', (event) => {
+                if (event.key == "Enter" && event.ctrlKey) {
+                    encode();
+                }
+            })
     );
 }
 
