@@ -39,19 +39,19 @@
         .note {
             font-size: smaller;
         }
-        .spoiler .spoiler--heading {
-            cursor: pointer;
-        }
-        .spoiler .spoiler--heading::after {
-            margin-inline-start: 0.5ex;
-            content: "⮟";
-        }
-        .spoiler.spoiler__hidden .spoiler--heading::after {
-            content: "⮜";
-        }
         .spoiler.spoiler__hidden .spoiler--inner {
             display: none;
         }
+        .spoiler .spoiler--heading {
+            cursor: pointer;
+        }
+            .spoiler .spoiler--heading::after {
+                margin-inline-start: 0.5ex;
+                content: "⮟";
+            }
+            .spoiler.spoiler__hidden .spoiler--heading::after {
+                content: "⮜";
+            }
     </style>
 </head>
 <body>
