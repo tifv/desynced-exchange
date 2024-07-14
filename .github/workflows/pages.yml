@@ -39,11 +39,11 @@ jobs:
         find ./build/lib/ -type f \
           '!' '(' -name '*.js' -o -name '*.wasm' ')' \
           -delete
-    # - name: Get GitHub logo
-    #   run: |
-    #     wget https://github.githubassets.com/images/modules/logos_page/github-mark.zip &&
-    #     unzip github-mark.zip github-mark/github-mark.svg &&
-    #     mv ./github-mark/github-mark.svg -t ./build/assets/ || exit 0
+    - name: Get GitHub logo
+      run: |
+        wget https://github.githubassets.com/images/modules/logos_page/github-mark.zip &&
+        unzip github-mark.zip github-mark/github-mark.svg &&
+        mv ./github-mark/github-mark.svg -t ./build/assets/ || exit 0
     - name: Upload
       uses: actions/upload-pages-artifact@v3
       with:

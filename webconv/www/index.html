@@ -4,6 +4,21 @@
 <head>
     <title>Desynced blueprint decoder/encoder</title>
     <style>
+        .github_link {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            opacity: 0.5;
+        }
+            .github_link:hover,
+            .github_link:focus,
+            .github_link:active
+            {
+                opacity: 1;
+            }
+            .github_link > img {
+                width: 30px;
+            }
         textarea {
             min-width: 600px;
             min-height: 400px;
@@ -40,6 +55,15 @@
     </style>
 </head>
 <body>
+    <a class="github_link"
+        href="https://github.com/tifv/desynced-exchange/"
+    >
+        <img
+            src="./assets/github-mark.svg"
+            alt="GitHub project"
+            onerror="this.parentNode.innerHTML='GitHub'"
+            ></img>
+    </a>
     <div class="stage stage__loading">
         <span class="stage__loading--message">Loading…</span>
     </div>
