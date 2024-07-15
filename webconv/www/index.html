@@ -39,6 +39,9 @@
         .note {
             font-size: smaller;
         }
+        .error {
+            color: red;
+        }
         .spoiler.spoiler__hidden .spoiler--inner {
             display: none;
         }
@@ -136,15 +139,19 @@
                 </fieldset>
             </div>
         </div>
-        <div id="pane__encoded" class="pane"
+        <div id="encoded--pane" class="pane"
             hidden data-show_state="encoded" >
-            <div class="errors"></div>
-            <textarea class="contents" placeholder="Blueprint string…"></textarea>
+            <div class="error"></div>
+            <label>Blueprint string:<br/>
+                <textarea id="encoded-contents" class="contents"></textarea>
+            </label>
         </div>
-        <div id="pane__decoded" class="pane"
+        <div id="decoded--pane" class="pane"
             hidden data-show_state="decoded" >
-            <div class="errors"></div>
-            <textarea class="contents" placeholder="Decoded blueprint…"></textarea>
+            <div class="error"></div>
+            <label>Decoded blueprint:<br/>
+                <textarea id="decoded-contents" class="contents"></textarea>
+            </label>
         </div>
     </div>
 </body>

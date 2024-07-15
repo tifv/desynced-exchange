@@ -26,14 +26,11 @@ import * as desynced_lib from "./lib/desynced_exchange_web.js";
 */
 
 class StateMaintainer {
-    /**
-     * @type {{[x: string]: StateConfig}}
-     */
+
+    /** @type {{[x: string]: StateConfig}} */
     states;
 
-    /**
-     * @type {string | null}
-     */
+    /** @type {string | null} */
     state;
 
     /**
@@ -45,6 +42,7 @@ class StateMaintainer {
         this._checkState(startState);
         this.state = startState;
     }
+
     /**
      * @param {string} state
      */
@@ -56,6 +54,7 @@ class StateMaintainer {
             throw new Error("Undefined state " + state);
         }
     }
+
     /**
      * @param {Action} action
      * @param {string} oldState
@@ -83,7 +82,47 @@ class StateMaintainer {
         }
         return result;
     }
+
 }
+
+class Side {
+
+    /** @type {string} */
+    name;
+
+    /** @type {HTMLElement} */
+    pane;
+
+    /** @type {HTMLTextAreaElement} */
+    contents;
+
+    /** @type {HTMLElement} */
+    error;
+
+    /**
+     * @param {string} name
+     */
+    constructor(name) {
+        let pane = document.getElementById(name + "--pane");
+        if (pane === null) {
+            throw new Error("unreachable");
+        }
+        let contents = pane.querySelector(".contents");
+        if (contents === null || !(contents instanceof HTMLTextAreaElement)) {
+            throw new Error("unreachable");
+        }
+        let error = pane.querySelector('.error');
+        if (error == null || !(error instanceof HTMLElement)) {
+            throw new Error("unreachable");
+        }
+        this.name = name;
+        this.pane = pane;
+        this.contents = contents;
+        this.error = error;
+    }
+
+}
+
 
 /**
  * @param {string} name
@@ -136,42 +175,36 @@ function getInterRepr() {
 
 async function main() {
     await desynced_lib.default();
+    let encoded_state = new Side("encoded");
+    let decoded_state = new Side("decoded");
     /**
-     * @param {string} state
+     * @param {Side} side
      * @returns {StateConfig}
      */
-    function setupState(state) {
-        let section = document.getElementById("pane__" + state);
-        if (section === null) {
-            throw new Error("unreachable");
-        }
+    function setupState(side) {
+        let {name, contents, error} = side;
         return {
             enter({value}) {
-                section.querySelectorAll('.errors')
-                    .forEach((el) => el.innerHTML = "");
+                error.innerHTML = "";
                 if (value !== undefined) {
-                    section.querySelectorAll('textarea')
-                        .forEach((el) => el.value = value);
+                    contents.value = value;
                 }
                 document
-                    .querySelectorAll("[data-show_state=" + state + "]")
+                    .querySelectorAll("[data-show_state=" + name + "]")
                     .forEach((el) => el.removeAttribute('hidden'));
-                section.querySelectorAll('textarea')
-                    .forEach((el) => {
-                        el.setSelectionRange(0, 0);
-                        el.focus();
-                    });
+                contents.setSelectionRange(0, 0);
+                contents.focus();
             },
             exit() {
                 document
-                    .querySelectorAll("[data-show_state=" + state + "]")
+                    .querySelectorAll("[data-show_state=" + name + "]")
                     .forEach((el) => el.setAttribute('hidden', ""));
             },
         }
     }
     let state = new StateMaintainer({
-        "encoded": setupState("encoded"),
-        "decoded": setupState("decoded"),
+        "encoded": setupState(encoded_state),
+        "decoded": setupState(decoded_state),
     }, "encoded");
     state.states.decoded.exit();
     state.states.encoded.enter({value: ""});
@@ -180,18 +213,11 @@ async function main() {
     document.querySelectorAll('.stage__main')
         .forEach((el) => el.removeAttribute('hidden'));
     function decode() {
-        let input_pane = document.getElementById("pane__encoded");
-        if (input_pane == null) {
-            throw new Error("unreachable");
-        }
-        let input = input_pane.querySelector('textarea');
-        if (input == null) {
-            throw new Error("unreachable");
-        }
+        let {contents, error: errors} = encoded_state;
         state.switchState(() => {
             try {
                 return {value: desynced_lib.decode(
-                    input.value.trim(),
+                    contents.value.trim(),
                     {
                         decodeFormat: getDecodeFormat(),
                         decodeStyle: getDecodeStyle(),
@@ -199,38 +225,23 @@ async function main() {
                     },
                 )};
             } catch (error) {
-                let errors = input_pane.querySelector('.errors');
-                if (errors == null) {
-                    throw new Error("unreachable");
-                }
                 errors.innerHTML = error;
                 throw error;
             }
         }, "encoded", "decoded")
     }
     function encode() {
-        let input_pane = document.getElementById("pane__decoded");
-        if (input_pane == null) {
-            throw new Error("unreachable");
-        }
-        let input = input_pane.querySelector('textarea');
-        if (input == null) {
-            throw new Error("unreachable");
-        }
+        let {contents, error: errors} = decoded_state;
         state.switchState(() => {
             try {
                 return {value: desynced_lib.encode(
-                    input.value.trim(),
+                    contents.value.trim(),
                     {
                         decodeFormat: getDecodeFormat(),
                         interRepr: getInterRepr(),
                     },
                 )};
             } catch (error) {
-                let errors = input_pane.querySelector('.errors');
-                if (errors == null) {
-                    throw new Error("unreachable");
-                }
                 errors.innerHTML = error;
                 throw error;
             }
@@ -249,27 +260,21 @@ async function main() {
         })
     );
     document.querySelectorAll("button[data-action=cv_to_decoded]").forEach(
-        (button) => button.addEventListener('click', decode)
+        (button) => button.addEventListener('click', () => decode())
     );
-    document.querySelectorAll("#pane__encoded > textarea").forEach(
-        (button) => /** @type {HTMLElement} */ (button)
-            .addEventListener('keydown', (event) => {
-                if (event.key == "Enter" && event.ctrlKey) {
-                    decode();
-                }
-            })
-    );
+    encoded_state.contents.addEventListener('keydown', (event) => {
+        if (event.key == "Enter" && event.ctrlKey) {
+            decode();
+        }
+    });
     document.querySelectorAll("button[data-action=cv_to_encoded]").forEach(
-        (button) => button.addEventListener('click', encode)
+        (button) => button.addEventListener('click', () => encode())
     );
-    document.querySelectorAll("#pane__decoded > textarea").forEach(
-        (button) => /** @type {HTMLElement} */ (button)
-            .addEventListener('keydown', (event) => {
-                if (event.key == "Enter" && event.ctrlKey) {
-                    encode();
-                }
-            })
-    );
+    decoded_state.contents.addEventListener('keydown', (event) => {
+        if (event.key == "Enter" && event.ctrlKey) {
+            encode();
+        }
+    });
 }
 
 main();
