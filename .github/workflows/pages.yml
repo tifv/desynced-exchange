@@ -13,12 +13,14 @@ jobs:
       run:
         shell: bash
     steps:
+    - name: Ensure wasm-pack
+      # run: cargo install wasm-pack
+      uses: jetli/wasm-pack-action@v0.4.0
     - name: Print Rust version
       run: |
-        rustc --version && cargo --version
-    - name: Ensure wasm-pack
-      run: |
-        cargo install wasm-pack
+        cargo --version &&
+        rustc --version &&
+        wasm-pack --version
     - name: Checkout
       uses: actions/checkout@v4
     - name: Create build directory
